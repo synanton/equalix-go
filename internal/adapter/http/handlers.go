@@ -151,10 +151,11 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 // non-in-flight → 400; in-flight → terminal Save, then exactly one
 // Decrement + CMS -1 + metrics record. Version conflict → re-read.
 //
-// Transactionality (spec §13 NOTE): the four steps are sequential calls,
-// not a Transact — a crash between Save and Decrement leaves an
-// over-reported slot for the watchdog (§8). The DB half can ride
-// Transactor once EQLX-3 owns this path; CMS cannot join any DB tx.
+// Transactionality (spec §13 NOTE): two distinct windows. (1) Save →
+// Decrement is DB-only and closable via Transact — deferred to EQLX-3,
+// which will own this path; until then a crash here leaves an
+// over-reported slot for the watchdog. (2) DB commit → CMS flush is
+// cross-store and fundamentally unclosable (§8 drift by design).
 func (h *Handler) completeTask(w http.ResponseWriter, r *http.Request) {
 	var req completeTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
