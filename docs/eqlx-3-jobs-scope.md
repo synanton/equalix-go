@@ -16,11 +16,28 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
 - `errgroup.WithContext` over all jobs. Tick errors (query failure,
   lock contention) are **recoverable**: log + continue, never return —
   a transient DB blip must not kill the process.
-- Only **startup errors** fail the group: no DB pool, lock infra broken,
-  CMS warm-up snapshot unreadable.
-- Shutdown: cancel + `context.WithTimeout` grace (configurable, default
-  30s). Jobs select `ctx.Done()` **between iterations, never mid-tick**;
-  an in-flight `Transact` aborts via ctx cancellation (pgx honors it).
+- **Startup-error rule (no exceptions):** startup = pre-launch readiness
+  only — DB pool ping, Redis ping (if CMS mode is redis), lock-infra
+  acquire/release probe. A failed probe returns from `Run` for main to
+  **exit non-zero** (orchestrator retries with its own backoff; the process
+  never invents retry loops). Once goroutines launch, *every* tick error is
+  recoverable, including first-tick connection errors. N consecutive
+  failures (`error_streak_threshold`, default 5) log at error level with
+  the streak count but never kill the process: a crash-loop is worse than
+  a stalled scheduler, and EQLX-6 alerting catches the stall.
+- Shutdown: cancel + `context.WithTimeout` grace (`shutdown_grace`,
+  default 30s). The loop never interrupts a running tick; shutdown works
+  because tick operations are ctx-aware (pgx aborts transactions on
+  cancellation) — grace covers cancel → operations returning, not tick
+  boundaries. A tick whose operations ignore ctx can overrun grace; every
+  job's tick takes ctx and passes it to every blocking call.
+- **Grace vs worst-case tick (pinned relationship):** grace is a *drain
+  budget*, not an interval multiple — it must cover one in-flight tick
+  plus send-pool drain on the hot loop. Batch caps (`worker_poll_size`,
+  `freeSlots ≤ max_tasks_in_process`) bound work per tick; `Config.Validate`
+  enforces `shutdown_grace ≥ max(10s, 100×dispatcher_interval)` so the two
+  numbers cannot drift apart silently. A pathologically slow DB can still
+  overrun any grace — the rule keeps honest configs honest, not physics.
 - Tick loops use `time.Ticker` (fixed interval, no drift accumulation);
   slow ticks skip beats rather than pile up (drain-on-wakeup).
 
@@ -33,8 +50,20 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
   (semaphore channel, cap = `dispatch_workers`, default 32 — separate from
   `maxTasksInProcess`, which bounds *slots*, not senders). Rationale: a slow
   executor must not stall the tick, and unbounded goroutines are not an
-  option. Backpressure: when the pool is full the tick skips sending and
-  the next tick retries (task is already DISPATCHED; timeout bounds the wait).
+  option.
+- **Pool behavior (pinned): claim-limited, no queue.** Each tick claims
+  `min(freeSlots, pool_free_capacity)` and submits exactly that many sends;
+  the remaining slots wait for the next tick. No bounded-blocking queue:
+  a queue would park DISPATCHED tasks in memory while holding fairness
+  slots, turning executor slowness into a memory problem. Under sustained
+  executor latency the slot cap is simply never fully used — honest
+  backpressure, visible in metrics.
+- **Send-failure signal for EQLX-4 (pinned):** the pool exposes an atomic
+  `FailedSends()` counter (incremented on every non-2xx/transport failure),
+  read but not acted on in this phase. Rationale: with async send, executor
+  failures otherwise surface only via missing webhooks, leaving the EQLX-4
+  error brake blind to the failure mode it exists to catch. The counter is
+  the brake's future input; EQLX-3 wires nothing to it.
 - **Executor error → leave DISPATCHED for timeout.** Java parity: send
   errors are logged, never thrown; only 2xx marks COMMITTED (port doc on
   `Executor.Send`). No immediate FAILED — the timeout sweep owns it.
@@ -43,12 +72,15 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
 ### 3. Priority calculator: per-tick, quota-aware
 
 - Each tick: `FindReceived(worker_poll_size)` → per task `Reserve` tag →
-  `CalculatePriority` (CMS estimate + penalty factor read from the RPS
-  controller handle; fixed 1000/initial-rps until EQLX-4 wires the live value)
-  → `Save(QUEUED)`. Sequential boost/penalty via `SequentialAdjust`.
+  `CalculatePriority` (CMS estimate + penalty factor from config key
+  `penalty_factor`, default 1000.0 = 1000/initial-rps Java parity; EQLX-4
+  swaps in the live value without touching code) → `Save(QUEUED)`.
+  Sequential boost/penalty via `SequentialAdjust`.
 - Promotion is **per-tick** (`FindStarved` + priority 0), not accumulated.
-- `RankByAging` enters only at *selection* when `policy != none`, always
-  with `maxPerClient` (CORRECTION-1). Default `none` = flat path, zero
+- **Ownership (pinned): the calculator writes, the dispatcher reads.**
+  `PromoteStarved` (priority-0 writes) belongs to the calculator tick;
+  `RankByAging` belongs to the *dispatcher selection path*, always with
+  `maxPerClient` (CORRECTION-1). Default `none` = flat path, zero
   aging cost (§6.3 invocation note).
 
 ### 4. Watchdog: thresholdless repair, two phases, one boundary
@@ -60,6 +92,12 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
 - Phase boundary: phase 2 starts after phase 1's last repair commits —
   single run, sequential, never interleaved. No "stabilization" wait: the
   snapshot is authoritative the moment counts match the task table.
+  **Transition criterion (pinned): phase 1 completes when the counts load
+  returns the full key→count map; phase 2 iterates that map and publishes
+  the drift report.** There is no other gate — no key count, no time bound.
+  **Phase-2 failure aborts the run and retries from phase 1 next tick** —
+  never resumes mid-map, so a half-published report cannot pair with a
+  half-rebuilt CMS.
 - Drift *threshold* is deliberately absent (parity: Java has none, only the
   metric cap). If operators want alerting thresholds, that's EQLX-6
   runbook material, not scheduler behavior.
@@ -79,6 +117,16 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
   crashed process releases on connection close — no TTL machinery needed.
   Lock key = stable 64-bit hash of the job name (document the function;
   distinct from the CMS hasher).
+- **Conn reservation (pinned): the locker owns a separate single-connection
+  pool** (`pgxpool`, `MaxConns: 1`), not a checked-out conn from the job
+  pool. Rationale: a lifetime-held checkout silently shrinks the job pool
+  by one and surprises anyone tuning `pool_max` in production; a dedicated
+  1-conn pool makes the reservation explicit and self-sizing.
+- **Hash function (pinned): FNV-1a 64** (`hash/fnv`) over
+  `"equalix:lock:" + jobName`. Deterministic across instances, restarts,
+  and language implementations — a future non-Go coordinator computes the
+  same key. (Same family as the CMS hasher by coincidence, not by
+  contract; the prefix keeps the namespaces disjoint.)
 - Non-blocking acquire: held-by-peer → tick skipped, no queueing.
 - Answers the deferred lease question: no lease, no TTL; liveness comes
   from TCP close, matching Java's ShedLock-over-JDBC closely enough that
@@ -90,8 +138,15 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
   DISPATCHED/COMMITTED task with `updated_at` older than
   `startup − task_timeout`, releasing slots. **Old-only**: a fresh
   in-flight row may belong to a live peer — touching it would steal work.
-- With `task-timeout-ms = 0` (disabled), recovery still releases nothing
-  and logs the skip (explicit, not silent).
+- **"Old" threshold (pinned): strictly greater than the sweep threshold —
+  `updated_at < startup − (task_timeout + 60s)`.** The 60s margin keeps
+  recovery racing the timeout sweep on the same tasks: anything the sweep
+  could legitimately claim belongs to the sweep, not to startup recovery.
+- **Timeout-disabled + recovery-enabled is a startup config error
+  (pinned): reject, don't skip.** With no timeout reference there is no
+  non-arbitrary definition of "stuck," and a silent no-op would leave
+  DISPATCHED tasks stranded forever while logging reassurance. Fail fast
+  with a clear message naming both keys.
 - Steady-state stuck tasks belong to the timeout sweep, not recovery.
 
 ---
@@ -105,8 +160,9 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
   buffering decorator (spec §4.4) in the jobs layer; Redis adapter stays
   EQLX-3-out (cross-instance fairness is Phase-5 differential scope).
 - **Config**: plain Go struct with Java defaults (spec §10); YAML/env
-  binding is EQLX-6. No new keys except `dispatch_workers` (default 32),
-  `shutdown_grace` (default 30s), `timeout_sweep_interval` (default 30s).
+  binding is EQLX-6. New keys: `dispatch_workers` (32), `shutdown_grace`
+  (30s), `timeout_sweep_interval` (30s), `error_streak_threshold` (5),
+  `penalty_factor` (1000.0), `recovery_enabled` (true).
 - **Completion ownership**: the chi handler keeps serving the webhook;
   jobs do not take it over in this phase — but the DB half
   (`Save` + `Decrement`) moves into `Transact`, closing window (1) from
@@ -120,3 +176,24 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
 - Hierarchical dispatch planner (flat mode only; H-mode is Phase-5 scope).
 - Kafka ingestion, gRPC, dead-letter UI, OpenAPI generation.
 - Migrate-on-startup wiring (goose files exist; service phase wires them).
+
+---
+
+## 3a run evidence (pinned definition)
+
+"3a runs" means this scripted scenario, pass or fail — not "the service
+starts":
+
+1. Start the service (test binary or local main) against a fresh database.
+2. Submit N=100 tasks through `POST /api/v1/tasks` across 3 fairness keys
+   (weights 1:2:7, continuous backlog per key).
+3. Observe all 100 reach terminal states via completion webhooks (stub
+   executor auto-completes) within a bounded time.
+4. Show per-key dispatch shares ≈ 10/20/70 from metrics/logs counters.
+5. Watchdog + timeout are registered as **no-op stubs** for 3a (their
+   bodies land in 3b). "Ticks clean" means the loop registered, ticked at
+   its interval, and returned no error — it validates the runner with
+   multiple concurrent jobs, not the job bodies. Full watchdog/timeout
+   behavior gets its own evidence scenario in 3b.
+
+Until this scenario exists and passes, "3a complete" is unclaimable.

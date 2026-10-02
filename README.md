@@ -16,6 +16,18 @@ This is **not a language port**. The Java code is the behavioral reference; the 
 
 **Pre-alpha.** Under active development. Not production-ready. See [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) for the current phase and [`CONTRIBUTING.md`](CONTRIBUTING.md) for the acceptance gates.
 
+### Maturity
+
+| Area | Implemented | Unit/integration tested | Conformance-validated | Benchmark-validated | Differentially validated vs Java |
+|---|---|---|---|---|---|
+| Domain core (virtual time, priority, CMS, selection) | ✅ | ✅ | ✅ (1:2:7 + seeded) | ✅ (hot-path benches) | ⬜ (Phase 5) |
+| Postgres adapter | ✅ | ✅ (testcontainers) | ⬜ | ⬜ | ⬜ (Phase 5) |
+| HTTP surface | ✅ | ✅ (contract tests) | ⬜ | ⬜ | ⬜ (Phase 5) |
+| Jobs (dispatcher, calculator) | ✅ | ✅ | ⬜ | ⬜ | ⬜ (Phase 5) |
+| Jobs (watchdog, timeout, recovery) | ⬜ (stubs) | ⬜ | ⬜ | ⬜ | ⬜ (Phase 5) |
+
+`⬜` = not yet; nothing in this table is claimed before its evidence exists.
+
 ---
 
 ## What It Is
@@ -299,7 +311,7 @@ Common commands:
 make test              # unit tests
 make test-integration  # requires Docker
 make test-conformance  # fairness invariants
-make test-differential # against Java Equalix
+make test-differential # against Java Equalix (Phase 5; no harness yet — target fails until test/differential lands)
 make lint              # golangci-lint
 make bench             # benchmarks
 ```
@@ -327,7 +339,7 @@ The Java implementation is the behavioral reference and executable oracle. `equa
 
 - Preserves fairness semantics, virtual-time behavior, CMS behavior, and adaptive RPS logic
 - Replaces framework-specific mechanisms (Spring DI, JPA, ShedLock) with Go-native equivalents (`pgx`, advisory locks, goroutines)
-- Is validated by differential testing: same workload, same configuration, compare dispatch decisions and fairness metrics
+- Is validated by differential testing (Phase 5; harness not yet built — no differential evidence exists today): same workload, same configuration, compare dispatch decisions and fairness metrics
 - Is not a class-by-class translation and does not aim to be
 
 Key Java references:

@@ -426,3 +426,83 @@ func TestListByKeyWithStatusFilter(t *testing.T) {
 		t.Fatalf("filtered = %v, %v", ids(filtered), err)
 	}
 }
+
+func TestLockerMutualExclusion(t *testing.T) {
+	clean(t)
+	dsn := pool.Config().ConnString()
+	a, err := adapter.NewLocker(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	b, err := adapter.NewLocker(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	ok, release, err := a.Lock(ctx, "dispatcher")
+	if err != nil || !ok {
+		t.Fatalf("first lock = %v, %v", ok, err)
+	}
+	// Peer holder denied: non-blocking, no error.
+	ok2, _, err := b.Lock(ctx, "dispatcher")
+	if err != nil || ok2 {
+		t.Fatalf("second lock = %v, %v; want denied", ok2, err)
+	}
+	// Different name unaffected.
+	ok3, release3, err := b.Lock(ctx, "watchdog")
+	if err != nil || !ok3 {
+		t.Fatalf("other-name lock = %v, %v", ok3, err)
+	}
+	release3()
+	// Release is idempotent; reacquire works.
+	release()
+	release()
+	ok4, release4, err := b.Lock(ctx, "dispatcher")
+	if err != nil || !ok4 {
+		t.Fatalf("reacquire = %v, %v", ok4, err)
+	}
+	release4()
+}
+
+func TestPoolDropsClosedConn(t *testing.T) {
+	// Pins the pgx v5.7.0 semantic the locker release path relies on:
+	// releasing a closed underlying conn drops it instead of reusing it
+	// (backend pid changes). If a pgx upgrade changes this, the locker
+	// must be revisited.
+	cfg, err := pgxpool.ParseConfig(pool.Config().ConnString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = 1
+	one, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer one.Close()
+	pid := func() int {
+		c, err := one.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Release()
+		var p int
+		if err := c.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	c, err := one.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before int
+	if err := c.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Conn().Close(ctx)
+	c.Release()
+	if after := pid(); after == before {
+		t.Fatalf("pool reused closed conn (pid %d)", after)
+	}
+}
