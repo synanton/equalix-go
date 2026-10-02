@@ -17,13 +17,15 @@ import (
 	"math"
 )
 
-// Sketch is a depth × width matrix of counters. It is not safe for
-// concurrent use; guard with a mutex at the call site (Java uses
-// synchronized on the adapter).
+// Sketch is a depth × width matrix of counters in one flat allocation
+// (table[row*width+col]): single contiguous region, no per-row headers,
+// cache-friendly linear scans on rebuild. It is not safe for concurrent
+// use; guard with a mutex at the call site (Java uses synchronized on
+// the adapter).
 type Sketch struct {
 	width int
 	depth int
-	table [][]int64
+	table []int64
 	total int64
 }
 
@@ -37,12 +39,11 @@ func New(width, depth int) *Sketch {
 	if depth <= 0 {
 		panic("cms: depth must be positive")
 	}
-	table := make([][]int64, depth)
-	for i := range table {
-		table[i] = make([]int64, width)
-	}
-	return &Sketch{width: width, depth: depth, table: table}
+	return &Sketch{width: width, depth: depth, table: make([]int64, depth*width)}
 }
+
+// at returns the cell index for row/col.
+func (s *Sketch) at(row, col int) int { return row*s.width + col }
 
 // Width returns the number of columns per row.
 func (s *Sketch) Width() int { return s.width }
@@ -54,7 +55,7 @@ func (s *Sketch) Depth() int { return s.depth }
 func (s *Sketch) Add(key string, delta int64) {
 	h := hashKey(key)
 	for row := 0; row < s.depth; row++ {
-		s.table[row][cell(h, row, s.width)] += delta
+		s.table[s.at(row, cell(h, row, s.width))] += delta
 	}
 	s.total += delta
 }
@@ -66,7 +67,7 @@ func (s *Sketch) EstimateCount(key string) int64 {
 	h := hashKey(key)
 	min := int64(math.MaxInt64)
 	for row := 0; row < s.depth; row++ {
-		if v := s.table[row][cell(h, row, s.width)]; v < min {
+		if v := s.table[s.at(row, cell(h, row, s.width))]; v < min {
 			min = v
 		}
 	}
@@ -86,10 +87,8 @@ func (s *Sketch) Total() int64 {
 
 // Rebuild discards all state and replays counts (watchdog / warm-up path).
 func (s *Sketch) Rebuild(counts map[string]int64) {
-	for _, row := range s.table {
-		for i := range row {
-			row[i] = 0
-		}
+	for i := range s.table {
+		s.table[i] = 0
 	}
 	s.total = 0
 	for k, v := range counts {

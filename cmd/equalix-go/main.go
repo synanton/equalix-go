@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -90,6 +91,9 @@ func (m *memMetrics) ObserveDispatchLatency(_ float64) {}
 func (m *memMetrics) SetRPS(r float64)                 { m.mu.Lock(); m.rps = r; m.mu.Unlock() }
 func (m *memMetrics) PublishDrift(_ map[string]int64)  {}
 
+// TODO(EQLX-4): placeholder — reports a fixed 1.0, not a measured rate.
+// Wire to the adaptive controller when it lands; until then GET /status
+// currentRps is a constant, not a metric.
 type fixedRPS struct{ rps float64 }
 
 func (f fixedRPS) CurrentRPS() float64 { return f.rps }
@@ -98,8 +102,8 @@ func run() error {
 	var (
 		dsn        = flag.String("dsn", os.Getenv("EQUALIX_DSN"), "PostgreSQL DSN (or EQUALIX_DSN)")
 		addr       = flag.String("addr", ":8080", "HTTP listen address")
-		apiKey     = flag.String("api-key", os.Getenv("EQUALIX_API_KEY"), "API key (or EQUALIX_API_KEY)")
-		maxPayload = flag.Int("max-payload-bytes", 1048576, "ingest payload cap")
+		apiKey     = flag.String("api-key", os.Getenv("EQUALIX_API_KEY"), "API key, prefer EQUALIX_API_KEY env (flag value is visible in ps)")
+		maxPayload = flag.Int("max-payload-bytes", 1048576, "ingest payload cap (Java app.queue.max-payload-bytes)")
 	)
 	flag.Parse()
 
@@ -158,7 +162,19 @@ func run() error {
 		},
 	}
 
-	runner := jobs.NewRunner(slog.Default(), probes,
+	// Probes run BEFORE the listener binds: no connection is accepted
+	// until readiness passes. (The runner also accepts probes, but the
+	// pre-bind gate here is what keeps fast clients off a not-ready
+	// backend; the runner gets the already-passing set for supervision.)
+	pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for _, probe := range probes {
+		if err := probe(pctx); err != nil {
+			return err // exit non-zero; orchestrator retries
+		}
+	}
+
+	runner := jobs.NewRunner(slog.Default(), nil,
 		jobs.NewNoopJob("watchdog", cfg.WatchdogInterval),
 		jobs.NewNoopJob("timeout", cfg.TimeoutSweepInterval),
 	)
@@ -189,8 +205,12 @@ func run() error {
 		_ = server.Shutdown(grace)
 		return err
 	case <-ctx.Done():
-		// Signal: graceful HTTP shutdown within grace, then runner drain.
-		// Runner normalizes shutdown cancels to nil (jobs contract).
+		// Signal: strictly sequential drain — (1) stop accepting + wait
+		// for in-flight HTTP within grace, (2) then runner drain. The two
+		// phases share the grace budget sequentially, never in parallel:
+		// a webhook accepted during HTTP drain must find the stores (and
+		// CMS flush path) still owned by a live runner, not torn down
+		// underneath it. Runner normalizes shutdown cancels to nil.
 		grace, cancel := context.WithTimeout(context.Background(), cfg.ShutdownGrace)
 		defer cancel()
 		if err := server.Shutdown(grace); err != nil {

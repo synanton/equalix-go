@@ -61,9 +61,10 @@ func (p *SendPool) Submit(ctx context.Context, fn func(ctx context.Context) erro
 	return c
 }
 
-// FailedSends counts failed executor sends since construction. Written by
-// the pool, currently unwired, reserved for the EQLX-4 error brake (which
-// would otherwise be blind to async send failures — the brake's input must
-// not depend on webhooks that may never arrive). Do not remove as dead
-// code; do not duplicate in EQLX-4.
+// FailedSends counts failed executor sends since construction: transport
+// errors and application-layer declines alike. This is deliberately a
+// superset of Java's completion-window error_rate (which never observes
+// send-level failures — a declined send just sits DISPATCHED until timeout
+// in Java too). EQLX-4 decides the weighting; the counter's job is to make
+// the signal exist, not to match Java's window exactly.
 func (p *SendPool) FailedSends() uint64 { return p.failed.Load() }
