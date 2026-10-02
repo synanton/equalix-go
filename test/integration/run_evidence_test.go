@@ -11,7 +11,9 @@ import (
 
 	"github.com/synanton/equalix-go/internal/domain"
 	"github.com/synanton/equalix-go/internal/jobs"
+	"github.com/synanton/equalix-go/internal/port"
 	"github.com/synanton/equalix-go/pkg/cms"
+	"github.com/synanton/equalix-go/test/helpers"
 )
 
 // memCMS is a mutex-guarded local CMSStore for evidence runs.
@@ -76,17 +78,14 @@ func (m *memMetrics) completed() int {
 
 // autoExecutor acks every send and completes the task inline (stub executor
 // auto-complete for run evidence): terminal Save + slot release + CMS -1,
-// mirroring the B2 completion protocol.
+// mirroring the B2 completion protocol. It takes the real port interfaces
+// (not anonymous ones) so the test is structurally identical to production
+// wiring and can validate a real port.Executor later.
 type autoExecutor struct {
 	metrics *memMetrics
-	tasks   interface {
-		Save(context.Context, *domain.Task) error
-		FindByID(context.Context, string) (*domain.Task, error)
-	}
-	counts interface {
-		Decrement(context.Context, string) error
-	}
-	cms *memCMS
+	tasks   port.TaskRepository
+	counts  port.CountsRepository
+	cms     *memCMS
 }
 
 func (e *autoExecutor) Send(ctx context.Context, id string, _, _ []byte) (bool, error) {
@@ -155,11 +154,14 @@ func TestRunEvidence_100Tasks(t *testing.T) {
 
 	// Drive ticks directly (no sleep): calculator drains RECEIVED, then
 	// dispatcher drains QUEUED. Bounded loop, fails loudly on stall.
+	// dispatchTicks proves iteration: dumping all 100 in one tick would
+	// leave it at ~1 and fail the assertion below.
 	for i := 0; i < 20; i++ {
 		if err := calc.TickForTest(ctx); err != nil {
 			t.Fatal(err)
 		}
 	}
+	dispatchTicks := 0
 	for i := 0; i < 300; i++ {
 		var remaining int
 		if err := pool2row(ctx, &remaining); err != nil {
@@ -171,31 +173,33 @@ func TestRunEvidence_100Tasks(t *testing.T) {
 		if err := dis.TickForTest(ctx); err != nil {
 			t.Fatal(err)
 		}
+		dispatchTicks++
 		if i == 299 {
 			t.Fatalf("QUEUED did not drain, %d remain", remaining)
 		}
 	}
+	if dispatchTicks < 3 {
+		t.Fatalf("dispatcher fired %d ticks for 100 tasks; want ≥3 (iteration, not dump)", dispatchTicks)
+	}
 
-	// Quiescence: sends run async, so completions lag the QUEUED drain.
-	// Poll for the fully drained state with a deadline — deterministic,
-	// fails loudly on stall instead of asserting mid-flight.
-	deadline := time.Now().Add(30 * time.Second)
-	for {
+	// Quiescence via the shared helper: sends run async, so completions
+	// lag the QUEUED drain. Deterministic, fails loudly on stall.
+	helpers.WaitFor(t, 30*time.Second, 10*time.Millisecond, func() string {
+		var inflight int
+		_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM tasks
+			WHERE fairness_key LIKE 'ev-%' AND status IN ('DISPATCHED','COMMITTED','QUEUED')`).Scan(&inflight)
+		total, _ := cmsketch.Total(ctx)
+		return fmt.Sprintf("inflight=%d cms=%d completions=%d",
+			inflight, total, metrics.completed())
+	}, func() bool {
 		var inflight int
 		if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM tasks
 			WHERE fairness_key LIKE 'ev-%' AND status IN ('DISPATCHED','COMMITTED','QUEUED')`).Scan(&inflight); err != nil {
 			t.Fatal(err)
 		}
 		total, _ := cmsketch.Total(ctx)
-		if inflight == 0 && total == 0 && metrics.completed() == 100 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no quiescence: inflight=%d cms=%d completions=%d",
-				inflight, total, metrics.completed())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		return inflight == 0 && total == 0 && metrics.completed() == 100
+	})
 
 	// All terminal, shares within ±2, no residual slots.
 	got := map[string]int{}

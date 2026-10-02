@@ -5,6 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="b2bbf82d-5aab-49dc-a77e-6aba72791fb3" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/equalix-go.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/equalix-go.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/eqlx-3-jobs-scope.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/eqlx-3-jobs-scope.md" afterDir="false" />
     </list>

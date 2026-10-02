@@ -65,6 +65,7 @@ func (p *SendPool) Submit(ctx context.Context, fn func(ctx context.Context) erro
 // errors and application-layer declines alike. This is deliberately a
 // superset of Java's completion-window error_rate (which never observes
 // send-level failures — a declined send just sits DISPATCHED until timeout
-// in Java too). EQLX-4 decides the weighting; the counter's job is to make
-// the signal exist, not to match Java's window exactly.
+// in Java too). Semantics fixed by spec §13 DECISION-5: earlier signal on
+// the same failure mode; EQLX-4 tunes α and threshold against this timing
+// difference, not Java's rate.
 func (p *SendPool) FailedSends() uint64 { return p.failed.Load() }
