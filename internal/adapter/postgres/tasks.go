@@ -58,6 +58,7 @@ func (s *TaskStore) Save(ctx context.Context, t *domain.Task) error {
 	}
 	if tag.RowsAffected() == 1 {
 		t.Version++
+		t.UpdatedAt = time.Now()
 		return nil
 	}
 	tag, err = s.q.Exec(ctx, `INSERT INTO tasks
@@ -78,6 +79,7 @@ func (s *TaskStore) Save(ctx context.Context, t *domain.Task) error {
 	}
 	if tag.RowsAffected() == 1 {
 		t.Version = 0
+		t.UpdatedAt = time.Now()
 		return nil
 	}
 	return fmt.Errorf("postgres: save task %s: %w", t.ID, port.ErrVersionConflict)
@@ -178,6 +180,18 @@ func (s *TaskStore) FindNextSequential(ctx context.Context, key string, seq int6
 	return t, nil
 }
 
+// ListByKey returns a key's tasks, optionally filtered to one status,
+// ordered by creation (contract list endpoint).
+func (s *TaskStore) ListByKey(ctx context.Context, key string, status *domain.Status) ([]*domain.Task, error) {
+	if status == nil {
+		return s.queryTasks(ctx, `SELECT `+taskColumns+` FROM tasks
+            WHERE fairness_key = $1 ORDER BY created_at ASC, id ASC`, key)
+	}
+	return s.queryTasks(ctx, `SELECT `+taskColumns+` FROM tasks
+        WHERE fairness_key = $1 AND status = $2::task_status
+        ORDER BY created_at ASC, id ASC`, key, string(*status))
+}
+
 func (s *TaskStore) queryTasks(ctx context.Context, sql string, args ...any) ([]*domain.Task, error) {
 	rows, err := s.q.Query(ctx, sql, args...)
 	if err != nil {
@@ -224,6 +238,7 @@ func scanTask(row pgx.Row) (*domain.Task, error) {
 		t.VirtualFinish = vfinish.Float64
 	}
 	t.CreatedAt = created
+	t.UpdatedAt = updated
 	if completed.Valid {
 		t.CompletedAt = completed.Time
 	}
