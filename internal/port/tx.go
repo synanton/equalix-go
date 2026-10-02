@@ -25,3 +25,23 @@ type TxPorts struct {
 type Transactor interface {
 	Transact(ctx context.Context, fn func(TxPorts) error) error
 }
+
+// Adapter contract notes (pgx implementation, EQLX-2):
+//
+//   - Context cancellation aborts the transaction: a cancelled ctx rolls
+//     back and fn's error is not committed. Commit/rollback races surface
+//     as driver errors (e.g. pgx.ErrTxCommitRollback); the adapter maps
+//     them to plain errors — never to ErrVersionConflict, which is reserved
+//     for optimistic-locking losses detected via Save.
+//   - TxPorts must not escape the callback: retaining a tx-bound repository
+//     past Transact's return is a use-after-commit. Adapters should make
+//     escape a loud failure in tests (e.g. closed-connection error), not a
+//     silent wrong-connection read.
+//
+// Open shape question for EQLX-2-pgx (record as DECISION once chosen):
+// the adapter needs pool-bound repositories (calculator reads, watchdog
+// snapshot, completion FindByID) and tx-bound ones (dispatch path) —
+// either as an explicit interface pair (pool vs tx variants, misuse is a
+// compile error) or one interface with two constructors (pool vs tx,
+// misuse is a runtime error). Java's @Transactional hides this via
+// per-thread proxied connections; Go must choose explicitly.
