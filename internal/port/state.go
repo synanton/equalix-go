@@ -8,8 +8,16 @@ import (
 
 // CountsRepository is the durable per-key in-flight counter
 // (client_counts; spec §2 table notes, §5.1 quota source, §8 repair
-// target). Increments/decrements are atomic and floored at zero.
+// target). Single-key operations; a dispatch batch of N claims is N calls
+// inside the caller's Transact (B1) — one round-trip per claim is accepted
+// parity cost, revisit with pipelining only on profile evidence.
+// All returns full maps like Java's GROUP BY (no paging); at very large
+// key counts prefer key-set iteration in a later revision (TODO).
 type CountsRepository interface {
+	// Increment/Decrement are atomic, floored at zero (GREATEST(0, ...)).
+	// Decrement is unconditional: callers sequence it after a successful
+	// terminal Save (completion protocol on TaskRepository.FindByID), so
+	// exactly-once release needs no conditional decrement here.
 	Increment(ctx context.Context, key string) error
 	Decrement(ctx context.Context, key string) error
 	Get(ctx context.Context, key string) (int, error)
@@ -23,7 +31,9 @@ type CountsRepository interface {
 // fairness key (client_sequence_state; spec §6.4).
 type SequenceStateRepository interface {
 	// FindOrCreate returns the state row, creating a zero row so the
-	// first task of a key can dispatch.
+	// first task of a key can dispatch. Concurrent creates for a fresh
+	// key resolve via the PK/unique constraint (adapter upsert); callers
+	// see exactly one row either way.
 	FindOrCreate(ctx context.Context, key string) (*domain.SequenceState, error)
 	Save(ctx context.Context, state *domain.SequenceState) error
 }
@@ -32,7 +42,12 @@ type SequenceStateRepository interface {
 // clock V (client_virtual_time / scheduler_virtual_clock; spec §2).
 // The in-memory domain.Store is the reference implementation.
 type VirtualTimeRepository interface {
-	// Reserve assigns the next finish tag for key (queueing path).
+	// Reserve performs the atomic tag upsert (GREATEST + increment) and
+	// returns the tag; concurrent reserves for one key get sequential
+	// tags (atomicity is the adapter's single-statement upsert, mirroring
+	// domain.Store.Reserve). The caller then persists the tag on the task
+	// row via TaskRepository.Save — the tag lives in two places by design
+	// (virtual-time table for fairness, task row for dispatch ordering).
 	Reserve(ctx context.Context, key string, quantum, weight float64) (float64, error)
 	// RecordDispatch advances T_k per key and V (dispatch path).
 	// Credits carry per-task aging credits (0 when aging is off).
