@@ -10,7 +10,13 @@ build:
 test:
 	$(GO) test -race ./...
 
+# Ryuk 0.8.1 (pinned by testcontainers-go v0.33.0) is not in every local
+# registry cache; 0.12.0 is protocol-compatible and widely cached. Override
+# only the reaper image — cleanup behavior is unchanged.
+export TESTCONTAINERS_RYUK_CONTAINER_IMAGE ?= testcontainers/ryuk:0.12.0
+
 test-integration:
+	TESTCONTAINERS_RYUK_CONTAINER_IMAGE="$(TESTCONTAINERS_RYUK_CONTAINER_IMAGE)" \
 	$(GO) test -race -tags=integration ./test/integration/...
 
 test-conformance:
