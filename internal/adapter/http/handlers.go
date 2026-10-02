@@ -150,6 +150,12 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 // completeTask implements the B2 protocol: terminal → no-write success;
 // non-in-flight → 400; in-flight → terminal Save, then exactly one
 // Decrement + CMS -1 + metrics record. Version conflict → re-read.
+//
+// Transactionality (spec §13 NOTE): two distinct windows. (1) Save →
+// Decrement is DB-only and closable via Transact — deferred to EQLX-3,
+// which will own this path; until then a crash here leaves an
+// over-reported slot for the watchdog. (2) DB commit → CMS flush is
+// cross-store and fundamentally unclosable (§8 drift by design).
 func (h *Handler) completeTask(w http.ResponseWriter, r *http.Request) {
 	var req completeTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
