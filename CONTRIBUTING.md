@@ -32,7 +32,7 @@ docker compose up -d
 # Run unit tests
 make test
 
-# Run integration tests
+# Run integration tests (needs Docker; pulls postgres:16-alpine on first run)
 make test-integration
 ```
 
