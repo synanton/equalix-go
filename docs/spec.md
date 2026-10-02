@@ -472,6 +472,8 @@ Java Micrometer names (`docs/design.md` §12) that equalix-go mirrors (Go names 
 - [ ] **GAP-3 (closed in this spec):** watchdog two-phase rebuild + drift publication — extracted from `WatchdogService`/`CmsDriftReport` (§8).
 - [ ] **GAP-4 (open, non-blocking for Phase 1):** clock-skew handling has no explicit Java mechanism; §11 records the analysis (DB-time SQL + monotonic upserts limit exposure to aging/timeout timing). Revisit in EQLX-3 with a fault-injection test.
 - [ ] **GAP-5 (open, deferred to EQLX-6):** `/healthz` vs `/readyz` semantics (what fails readiness: DB? Redis? both?) — Java only has actuator health/info. Decide during operability work; record in `docs/runbook.md`.
+- [x] **DECISION-1 (EQLX-1, closed): CMS decay.** Replicate code behavior (no decay), not design prose. Rationale: code is authoritative per the extraction rules; adding decay would change fairness dynamics and break differential parity. Decay, if ever wanted, is a new feature with its own spec section — not parity work. Implemented in `pkg/cms` (no decay paths).
+- [x] **DECISION-2 (EQLX-1, closed): `retry_count`.** Keep the column and the API field (`Task.RetryCount`, `retryCount` in `TaskStatusResponse`), but invent no retry semantics: the scheduler never increments it (Java parity — `CreateTaskUseCase` sets 0, nothing else writes). Retry policy stays with the remote executor; resubmission is a new task.
 - [ ] **GAP-6 (open, deferred to EQLX-2):** Go migration tooling (goose vs golang-migrate) and whether V2/shedlock artifacts appear in any form — decision in EQLX-1 with the module skeleton.
 
 ---
