@@ -190,6 +190,10 @@ starts":
 3. Observe all 100 reach terminal states via completion webhooks (stub
    executor auto-completes) within a bounded time.
 4. Show per-key dispatch shares ≈ 10/20/70 from metrics/logs counters.
-5. Show watchdog + timeout sweep ticks firing without errors in logs.
+5. Watchdog + timeout are registered as **no-op stubs** for 3a (their
+   bodies land in 3b). "Ticks clean" means the loop registered, ticked at
+   its interval, and returned no error — it validates the runner with
+   multiple concurrent jobs, not the job bodies. Full watchdog/timeout
+   behavior gets its own evidence scenario in 3b.
 
 Until this scenario exists and passes, "3a complete" is unclaimable.

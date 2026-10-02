@@ -18,12 +18,12 @@ This is **not a language port**. The Java code is the behavioral reference; the 
 
 ### Maturity
 
-| Area | Implemented | Unit/integration tested | Conformance-validated | Differentially validated vs Java |
-|---|---|---|---|---|
-| Domain core (virtual time, priority, CMS, selection) | ✅ | ✅ | ✅ (1:2:7 + seeded) | ⬜ (Phase 5) |
-| Postgres adapter | ✅ | ✅ (testcontainers) | ⬜ | ⬜ (Phase 5) |
-| HTTP surface | ✅ | ✅ (contract tests) | ⬜ | ⬜ (Phase 5) |
-| Jobs (dispatcher, calculator, watchdog, …) | ⬜ (EQLX-3) | ⬜ | ⬜ | ⬜ (Phase 5) |
+| Area | Implemented | Unit/integration tested | Conformance-validated | Benchmark-validated | Differentially validated vs Java |
+|---|---|---|---|---|---|
+| Domain core (virtual time, priority, CMS, selection) | ✅ | ✅ | ✅ (1:2:7 + seeded) | ✅ (hot-path benches) | ⬜ (Phase 5) |
+| Postgres adapter | ✅ | ✅ (testcontainers) | ⬜ | ⬜ | ⬜ (Phase 5) |
+| HTTP surface | ✅ | ✅ (contract tests) | ⬜ | ⬜ | ⬜ (Phase 5) |
+| Jobs (dispatcher, calculator, watchdog, …) | ⬜ (EQLX-3) | ⬜ | ⬜ | ⬜ | ⬜ (Phase 5) |
 
 `⬜` = not yet; nothing in this table is claimed before its evidence exists.
 
