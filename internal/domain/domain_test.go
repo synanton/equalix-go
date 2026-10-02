@@ -7,12 +7,12 @@ import (
 
 func TestReserveFinishTag(t *testing.T) {
 	tests := []struct {
-		name       string
-		keyFinish  float64
-		systemV    float64
-		quantum    float64
-		weight     float64
-		want       float64
+		name      string
+		keyFinish float64
+		systemV   float64
+		quantum   float64
+		weight    float64
+		want      float64
 	}{
 		{"fresh key starts at V", 0, 5000, 1000, 1.0, 6000},
 		{"active key above V", 8000, 5000, 1000, 1.0, 9000},
@@ -107,11 +107,11 @@ func TestSequentialAdjust(t *testing.T) {
 
 func TestFreeSlots(t *testing.T) {
 	tests := []struct {
-		name                                        string
-		max, inFlight                               int
-		adaptive                                    bool
-		rps, interval                               float64
-		want                                        int
+		name          string
+		max, inFlight int
+		adaptive      bool
+		rps, interval float64
+		want          int
 	}{
 		{"headroom", 5000, 100, false, 0, 0, 4900},
 		{" saturated clamps at 0", 5000, 6000, false, 0, 0, 0},
@@ -179,23 +179,42 @@ func TestRankByAging(t *testing.T) {
 	// linear aging λ=1000/s overcomes a 50000 gap after 60 s.
 	young := queuedTask("young", "a", 1000, now.Add(-time.Second))
 	old := queuedTask("old", "b", 51000, now.Add(-time.Minute))
-	got := RankByAging([]*Task{young, old}, 1, AgingLinear, 1000, 0, now)
+	zero := func(string) int { return 0 }
+	got := RankByAging([]*Task{young, old}, 1, AgingLinear, 1000, 0, now, 0, zero)
 	if len(got) != 1 || got[0].ID != "old" {
 		t.Fatalf("RankByAging = %v, want [old]", ids(got))
 	}
 	// Policy none keeps stored order.
-	got = RankByAging([]*Task{young, old}, 2, AgingNone, 1000, 0, now)
+	got = RankByAging([]*Task{young, old}, 2, AgingNone, 1000, 0, now, 0, zero)
 	if len(got) != 2 || got[0].ID != "young" {
 		t.Fatalf("RankByAging(none) = %v, want [young old]", ids(got))
 	}
 }
 
+func TestRankByAgingRespectsQuota(t *testing.T) {
+	// Parity with Java: both aging candidate queries take maxPerClient, so
+	// keys at quota contribute no candidates even when aging would promote
+	// them (spec §5.1, review: aging does NOT override quota).
+	now := time.Now()
+	old := queuedTask("old", "a", 999999, now.Add(-time.Hour))
+	atQuota := func(k string) int {
+		if k == "a" {
+			return 5
+		}
+		return 0
+	}
+	got := RankByAging([]*Task{old}, 1, AgingLinear, 1000, 0, now, 5, atQuota)
+	if len(got) != 0 {
+		t.Fatalf("RankByAging = %v, want [] (key at quota)", ids(got))
+	}
+}
+
 func TestAgingCreditTable(t *testing.T) {
 	tests := []struct {
-		policy        AgingPolicy
-		wait, lambda  float64
-		gamma         float64
-		want          float64
+		policy       AgingPolicy
+		wait, lambda float64
+		gamma        float64
+		want         float64
 	}{
 		{AgingNone, 60, 1000, 2, 0},
 		{AgingLinear, 30, 1000, 0, 30000},
@@ -239,6 +258,60 @@ func TestSequenceStateMachine(t *testing.T) {
 	if !s.Ready() || s.NextSequence() != 3 {
 		t.Fatalf("after force-unblock = %+v, want next=3", s)
 	}
+}
+
+func TestSequenceFailureThenLateSuccess(t *testing.T) {
+	// The "task actually completed after being marked failed" race: Java's
+	// sequential completion handler clears blocked/executing on success, so
+	// a late success unblocks the key and advances past the failed sequence.
+	var s SequenceState
+	s.OnDispatch(1, "task-1")
+	now := time.Now()
+	s.OnFailure(now)
+	if s.Ready() {
+		t.Fatal("failed key must be blocked")
+	}
+	s.OnSuccess(1)
+	if !s.Ready() || s.Blocked {
+		t.Fatalf("late success must unblock, state = %+v", s)
+	}
+	if s.NextSequence() != 2 {
+		t.Fatalf("next = %d, want 2", s.NextSequence())
+	}
+}
+
+func TestSelectBatchDeterministic(t *testing.T) {
+	// Same candidates + same counts → same selection, every time. Guards
+	// against future changes introducing map iteration or time dependence.
+	now := time.Now()
+	cands := []*Task{
+		queuedTask("t3", "b", 300, now),
+		queuedTask("t1", "a", 100, now),
+		queuedTask("t2", "a", 100, now.Add(-time.Second)),
+	}
+	zero := func(string) int { return 0 }
+	first := ids(SelectBatch(cands, 2, 0, zero))
+	for i := 0; i < 50; i++ {
+		if got := ids(SelectBatch(cands, 2, 0, zero)); !equal(got, first) {
+			t.Fatalf("run %d: %v != %v, selection not deterministic", i, got, first)
+		}
+	}
+	// t2 (older createdAt) beats t1 on the priority tie.
+	if len(first) != 2 || first[0] != "t2" || first[1] != "t1" {
+		t.Fatalf("selection = %v, want [t2 t1]", first)
+	}
+}
+
+func equal(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestCountsFloorAtZero(t *testing.T) {

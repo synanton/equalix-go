@@ -13,6 +13,11 @@ const DefaultQuantum = 1000.0
 // An idle key restarts at system virtual time V, so it cannot bank credit.
 // Mirrors the Java ON CONFLICT ... GREATEST(...) + increment upsert
 // (spec §2.3); callers persist the returned tag via Store.
+//
+// TIMING (load-bearing): a tag is reserved exactly once per task, at
+// queueing time. Re-tagging losers on every dispatcher tick inflates their
+// tags and destroys fairness (a weight-7 tenant would win every round).
+// The conformance test guards this: deviation is 0 only with tag-once.
 func ReserveFinishTag(keyFinish, systemV, quantum, weight float64) float64 {
 	w := weight
 	if w <= 0 {
@@ -48,6 +53,10 @@ type KeyState struct {
 // Store is an in-memory virtual-time table: per-key state plus the system
 // clock V. The production adapter backs this with client_virtual_time /
 // scheduler_virtual_clock rows (spec §2.1–2.2).
+//
+// Store is safe for concurrent use (mutex-guarded): it is the in-memory
+// reference implementation the EQLX-2 Postgres adapter tests compare
+// against, not test-only scaffolding.
 type Store struct {
 	mu   sync.Mutex
 	keys map[string]KeyState

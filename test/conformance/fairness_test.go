@@ -6,6 +6,7 @@ package conformance
 
 import (
 	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -130,6 +131,55 @@ func TestWeightedFairness_1_2_7(t *testing.T) {
 		if dev > 2 {
 			t.Errorf("tenant %s: got %d, expected %.0f (deviation %.1f > 2)",
 				tn.key, tn.got, expected, dev)
+		}
+	}
+}
+
+// TestWeightedFairness_SeededRandom proves the invariant beyond one
+// configuration: 5 tenants with shuffled weights, 5000 dispatches, fixed
+// seed for reproducibility. Shares must track weights within ±3 tasks.
+func TestWeightedFairness_SeededRandom(t *testing.T) {
+	rng := rand.New(rand.NewSource(42))
+	weights := []float64{1, 2, 3, 4, 5}
+	rng.Shuffle(len(weights), func(i, j int) { weights[i], weights[j] = weights[j], weights[i] })
+	var tenants []tenant
+	for i, w := range weights {
+		tenants = append(tenants, tenant{key: fmt.Sprintf("t%d", i), weight: w})
+	}
+	const dispatches = 5000
+	simulate(t, tenants, dispatches, 1000.0/25.0, 6)
+
+	var total float64
+	for _, tn := range tenants {
+		total += tn.weight
+	}
+	for _, tn := range tenants {
+		expected := float64(dispatches) * tn.weight / total
+		dev := float64(tn.got) - expected
+		if dev < 0 {
+			dev = -dev
+		}
+		t.Logf("tenant %s weight %.0f: got %d, expected %.0f, deviation %.1f",
+			tn.key, tn.weight, tn.got, expected, dev)
+		if dev > 3 {
+			t.Errorf("tenant %s: got %d, expected %.0f (deviation %.1f > 3)",
+				tn.key, tn.got, expected, dev)
+		}
+	}
+}
+
+// TestDispatcherDeterministic runs the full pipeline twice and requires
+// identical per-tenant shares: same inputs must yield same dispatches.
+func TestDispatcherDeterministic(t *testing.T) {
+	run := func() []int {
+		tenants := []tenant{{"a", 1, 0}, {"b", 2, 0}, {"c", 7, 0}}
+		simulate(t, tenants, 1000, 1000.0/25.0, 6)
+		return []int{tenants[0].got, tenants[1].got, tenants[2].got}
+	}
+	first, second := run(), run()
+	for i := range first {
+		if first[i] != second[i] {
+			t.Fatalf("runs differ: %v vs %v", first, second)
 		}
 	}
 }

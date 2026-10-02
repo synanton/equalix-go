@@ -5,13 +5,13 @@ import "time"
 // SequenceState is the per-key sequential pipeline cursor, mirroring the
 // client_sequence_state row (spec §6.4).
 type SequenceState struct {
-	FairnessKey           string
-	LastCompletedSequence int64
+	FairnessKey            string
+	LastCompletedSequence  int64
 	LastDispatchedSequence int64
-	CurrentExecutingID    string
-	HasExecuting          bool
-	Blocked               bool
-	BlockedAt             time.Time
+	CurrentExecutingID     string
+	HasExecuting           bool
+	Blocked                bool
+	BlockedAt              time.Time
 }
 
 // NextSequence returns the sequence number the dispatcher should serve:

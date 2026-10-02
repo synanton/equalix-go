@@ -13,13 +13,13 @@ import "time"
 type Status string
 
 const (
-	StatusReceived  Status = "RECEIVED"
-	StatusQueued    Status = "QUEUED"
+	StatusReceived   Status = "RECEIVED"
+	StatusQueued     Status = "QUEUED"
 	StatusDispatched Status = "DISPATCHED"
-	StatusCommitted Status = "COMMITTED"
-	StatusSucceeded Status = "SUCCEEDED"
-	StatusFailed    Status = "FAILED"
-	StatusTimeout   Status = "TIMEOUT"
+	StatusCommitted  Status = "COMMITTED"
+	StatusSucceeded  Status = "SUCCEEDED"
+	StatusFailed     Status = "FAILED"
+	StatusTimeout    Status = "TIMEOUT"
 )
 
 // IsInFlight reports whether the task holds an executor slot.
@@ -32,23 +32,25 @@ func (s Status) IsTerminal() bool {
 	return s == StatusSucceeded || s == StatusFailed || s == StatusTimeout
 }
 
-// Task is one unit of scheduled work. Payload and result are opaque bytes;
-// the scheduler interprets only scheduling metadata (spec §1).
+// Task is one unit of scheduled work. The scheduler interprets only
+// scheduling metadata; opaque payload/result bytes travel with the task in
+// the adapter layer (DB row, executor envelope) and are deliberately not
+// part of the domain model, keeping the core free of I/O (spec §1).
 type Task struct {
-	ID                    string
-	FairnessKey           string
-	Weight                float64
-	Status                Status
-	Priority              int64
-	HasPriority           bool
-	VirtualFinish         float64
-	CreatedAt             time.Time
-	CompletedAt           time.Time
-	RetryCount            int
-	LastError             string
-	Sequential            bool
-	SequenceNumber        int64
-	DependsOnTaskID       string
+	ID                     string
+	FairnessKey            string
+	Weight                 float64
+	Status                 Status
+	Priority               int64
+	HasPriority            bool
+	VirtualFinish          float64
+	CreatedAt              time.Time
+	CompletedAt            time.Time
+	RetryCount             int
+	LastError              string
+	Sequential             bool
+	SequenceNumber         int64
+	DependsOnTaskID        string
 	RequiresPreviousResult bool
 }
 

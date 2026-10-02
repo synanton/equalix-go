@@ -11,10 +11,10 @@ import (
 type AgingPolicy string
 
 const (
-	AgingNone    AgingPolicy = "none"
-	AgingLinear  AgingPolicy = "linear"
-	AgingLog     AgingPolicy = "log"
-	AgingPower   AgingPolicy = "power"
+	AgingNone   AgingPolicy = "none"
+	AgingLinear AgingPolicy = "linear"
+	AgingLog    AgingPolicy = "log"
+	AgingPower  AgingPolicy = "power"
 )
 
 // Credit returns A(W): the priority units subtracted from a task that has
@@ -86,7 +86,7 @@ func SelectBatch(candidates []*Task, freeSlots, maxPerClient int, inFlight func(
 	if freeSlots <= 0 {
 		return nil
 	}
-	eligible := candidates[:0:0]
+	eligible := make([]*Task, 0, len(candidates))
 	for _, t := range candidates {
 		if t.Status != StatusQueued || t.Sequential {
 			continue
@@ -104,7 +104,9 @@ func SelectBatch(candidates []*Task, freeSlots, maxPerClient int, inFlight func(
 }
 
 // PromoteStarved sets priority 0 on tasks older than maxQueued, bypassing
-// quota checks (spec §5.1 backstop). Returns the promoted set.
+// quota checks (spec §5.1 backstop). It mutates the promoted tasks in place
+// to reflect the promotion; callers reuse the same slice for selection.
+// Returns the promoted set.
 func PromoteStarved(candidates []*Task, now time.Time, maxQueued time.Duration) []*Task {
 	var promoted []*Task
 	for _, t := range candidates {
@@ -123,7 +125,9 @@ func PromoteStarved(candidates []*Task, now time.Time, maxQueued time.Duration) 
 // RankByAging keeps the best freeSlots of candidates by aged effective
 // priority P − A(W), tie-broken by (createdAt, id) — the in-memory
 // equivalent of selectWithAging + AgingService.rank (spec §§5.1, 6.3).
-func RankByAging(candidates []*Task, freeSlots int, policy AgingPolicy, lambda, gamma float64, now time.Time) []*Task {
+// Like the Java path (both candidate queries take maxPerClient), quota
+// filtering applies before ranking: keys at quota contribute no candidates.
+func RankByAging(candidates []*Task, freeSlots int, policy AgingPolicy, lambda, gamma float64, now time.Time, maxPerClient int, inFlight func(key string) int) []*Task {
 	type ranked struct {
 		t *Task
 		e float64
@@ -131,6 +135,9 @@ func RankByAging(candidates []*Task, freeSlots int, policy AgingPolicy, lambda, 
 	rs := make([]ranked, 0, len(candidates))
 	for _, t := range candidates {
 		if t.Status != StatusQueued || t.Sequential {
+			continue
+		}
+		if maxPerClient > 0 && inFlight(t.FairnessKey) >= maxPerClient {
 			continue
 		}
 		waitSecs := now.Sub(t.CreatedAt).Seconds()

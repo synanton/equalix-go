@@ -5,6 +5,10 @@ import "sync"
 // Counts is an in-memory durable-counter equivalent: per-key in-flight
 // counts with atomic increment and floor-at-zero decrement, mirroring
 // client_counts (UPDATE ... SET in_flight_count = GREATEST(0, ... + delta)).
+//
+// A plain Mutex (not RWMutex) guards the map: the domain core runs
+// single-goroutine in tests and real fan-out lives in the adapter layer.
+// Revisit with adapter-concurrency benchmarks if profiles say otherwise.
 type Counts struct {
 	mu sync.Mutex
 	m  map[string]int
