@@ -76,22 +76,22 @@ Measured fairness in Java, with tenants at weights 1 : 2 : 7 continuously backlo
 `equalix-go` is deliberately both a production project and a training project. The two tracks share evidence but have different acceptance gates.
 
 ```text
-equalix-go
-│
-┌──────────────┴──────────────┐
-│                             │
-Production                Training
-│                             │
+              equalix-go
+                   │
+    ┌──────────────┴──────────────┐
+    │                             │
+Production                    Training
+    │                             │
 reliability               idiomatic Go
 performance               concurrency
 deployment                distributed systems
 operations                algorithms
-│                             │
-└──────────────┬──────────────┘
-               │
-        shared evidence
-        tests / benchmarks /
-        differential oracle
+    │                             │
+    └──────────────┬──────────────┘
+                   │
+            shared evidence
+          tests / benchmarks /
+          differential oracle
 ```
 
 - **Production track** — a real service that can be deployed and operated. Acceptance requires load, failure, and recovery evidence (see [`CONTRIBUTING.md`](CONTRIBUTING.md#production-gate)).
@@ -205,7 +205,7 @@ All `/api/v1/**` routes require header `X-API-Key` (mirrors Java).
 
 | Method | Endpoint                      | Description                                              |
 | ------ | ----------------------------- | -------------------------------------------------------- |
-| `POST` | `/api/v1/tasks`               | Ingest a task (`fairnessKey`, `weight`, `payload`, ...) |
+| `POST` | `/api/v1/tasks`               | Ingest a task (`fairnessKey`, `weight`, `payload`, ...)  |
 | `GET`  | `/api/v1/tasks/{id}`          | Status & progress                                        |
 | `GET`  | `/api/v1/tasks?fairnessKey=`  | List tasks for a fairness key (optional `status`)        |
 | `POST` | `/api/v1/tasks/{id}/complete` | Mark task complete (success/fail)                        |
