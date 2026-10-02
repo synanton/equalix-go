@@ -37,15 +37,19 @@ func (s Status) IsTerminal() bool {
 // the adapter layer (DB row, executor envelope) and are deliberately not
 // part of the domain model, keeping the core free of I/O (spec §1).
 type Task struct {
-	ID                     string
-	FairnessKey            string
-	Weight                 float64
-	Status                 Status
-	Priority               int64
-	HasPriority            bool
-	VirtualFinish          float64
-	CreatedAt              time.Time
-	CompletedAt            time.Time
+	ID            string
+	FairnessKey   string
+	Weight        float64
+	Status        Status
+	Priority      int64
+	HasPriority   bool
+	VirtualFinish float64
+	CreatedAt     time.Time
+	CompletedAt   time.Time
+	// UpdatedAt is the last status-change time. Completion latency
+	// (now - UpdatedAt) feeds the adaptive RPS controller, so the adapter
+	// maintains it on every Save (see NOTE in docs/spec.md §13).
+	UpdatedAt              time.Time
 	RetryCount             int
 	LastError              string
 	Sequential             bool

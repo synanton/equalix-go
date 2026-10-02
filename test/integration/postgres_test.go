@@ -404,3 +404,25 @@ func ids(ts []*domain.Task) []string {
 	sort.Strings(out)
 	return out
 }
+
+func TestListByKeyWithStatusFilter(t *testing.T) {
+	clean(t)
+	q := queuedTask(80, "a", 1)
+	d := queuedTask(81, "a", 2)
+	d.Status = domain.StatusDispatched
+	o := queuedTask(82, "other", 3)
+	for _, tk := range []*domain.Task{q, d, o} {
+		if err := tasks.Save(ctx, tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err := tasks.ListByKey(ctx, "a", nil)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("unfiltered = %v, %v", ids(all), err)
+	}
+	queued := domain.StatusQueued
+	filtered, err := tasks.ListByKey(ctx, "a", &queued)
+	if err != nil || len(filtered) != 1 || filtered[0].ID != uuid(80) {
+		t.Fatalf("filtered = %v, %v", ids(filtered), err)
+	}
+}

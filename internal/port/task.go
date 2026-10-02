@@ -45,7 +45,11 @@ type TaskRepository interface {
 	// no paging (see CountsRepository.All note on cardinality).
 	CountInFlight(ctx context.Context) (map[string]int, error)
 	// FindNextSequential returns the QUEUED sequential task for key at
-	// sequence number seq, or (nil, nil) when no such task is queued
-	// (spec §6.4).
+	// sequence number seq, or (nil, nil) when absent.
 	FindNextSequential(ctx context.Context, key string, seq int64) (*domain.Task, error)
+	// ListByKey returns tasks for a fairness key, optionally filtered to
+	// one status (nil status = all), ordered by creation. Added for the
+	// list endpoint (chi surface, EQLX-2-chi): the contract's
+	// GET /tasks?fairnessKey=&status= has no port path without it.
+	ListByKey(ctx context.Context, key string, status *domain.Status) ([]*domain.Task, error)
 }
