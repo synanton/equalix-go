@@ -121,7 +121,10 @@ func (h *Handler) internal(w http.ResponseWriter) {
 // (app.security.api-key), no per-tenant keys, no DB table, no rotation.
 // The middleware validates against the startup-loaded key, so no port is
 // needed and no tenant flows from the key — the fairness key always comes
-// from the request body (or Kafka record key), never from auth.
+// from the request body (or Kafka record key), never from auth. Implication,
+// stated once: the scheduler is NOT multi-tenant at the auth layer — one
+// key unlocks everything — and only at the fairness layer. Do not add
+// per-tenant keys without a spec section and a port.
 func isNotFound(err error) bool { return errors.Is(err, port.ErrNotFound) }
 
 func isConflict(err error) bool { return errors.Is(err, port.ErrVersionConflict) }

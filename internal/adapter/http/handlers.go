@@ -150,6 +150,11 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 // completeTask implements the B2 protocol: terminal → no-write success;
 // non-in-flight → 400; in-flight → terminal Save, then exactly one
 // Decrement + CMS -1 + metrics record. Version conflict → re-read.
+//
+// Transactionality (spec §13 NOTE): the four steps are sequential calls,
+// not a Transact — a crash between Save and Decrement leaves an
+// over-reported slot for the watchdog (§8). The DB half can ride
+// Transactor once EQLX-3 owns this path; CMS cannot join any DB tx.
 func (h *Handler) completeTask(w http.ResponseWriter, r *http.Request) {
 	var req completeTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
