@@ -74,7 +74,9 @@ func (l *Locker) Lock(ctx context.Context, name string) (bool, func(), error) {
 		// session-scoped, so returning a still-locked connection to this
 		// MaxConns:1 pool would deny peers for the process lifetime.
 		// Closing the underlying conn kills the session (and the lock);
-		// Release then drops it instead of reusing it.
+		// Release then drops it instead of reusing it. Verified against
+		// pgx v5.7.0 by TestPoolDropsClosedConn (backend pid changes
+		// across the close+release cycle).
 		if _, err := conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, lockKey(name)); err != nil {
 			_ = conn.Conn().Close(context.Background())
 		}

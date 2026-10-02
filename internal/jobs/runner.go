@@ -55,7 +55,9 @@ func (r *Runner) Run(ctx context.Context) error {
 			// Run (Loop returns after ctx.Done). Normalize it so shutdown
 			// exits zero; anything else is a real startup failure.
 			// Job authors must not rely on this for tick errors — those
-			// never escape Run by contract.
+			// never escape Run by contract. Companion to Loop's contract
+			// below: the loop never interrupts, the tick aborts, the
+			// runner normalizes the cancel that comes back.
 			if errors.Is(err, context.Canceled) {
 				err = nil
 			}

@@ -464,3 +464,45 @@ func TestLockerMutualExclusion(t *testing.T) {
 	}
 	release4()
 }
+
+func TestPoolDropsClosedConn(t *testing.T) {
+	// Pins the pgx v5.7.0 semantic the locker release path relies on:
+	// releasing a closed underlying conn drops it instead of reusing it
+	// (backend pid changes). If a pgx upgrade changes this, the locker
+	// must be revisited.
+	cfg, err := pgxpool.ParseConfig(pool.Config().ConnString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = 1
+	one, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer one.Close()
+	pid := func() int {
+		c, err := one.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Release()
+		var p int
+		if err := c.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	c, err := one.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before int
+	if err := c.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Conn().Close(ctx)
+	c.Release()
+	if after := pid(); after == before {
+		t.Fatalf("pool reused closed conn (pid %d)", after)
+	}
+}

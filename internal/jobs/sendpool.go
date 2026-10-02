@@ -17,10 +17,13 @@ type SendPool struct {
 	log    *slog.Logger
 }
 
-// NewSendPool returns a pool with capacity workers. Panics in send fns are
-// recovered, logged, and counted as failures: a crashing executor client
-// must degrade into FailedSends (visible to the EQLX-4 brake), never into
-// a dead process — the scope's recoverable-tick posture applies here too.
+// NewSendPool returns a pool with capacity workers. Panic policy,
+// stated once: send-path panics are contained, never fatal. A panic in fn
+// is recovered, logged, and counted into FailedSends; the pool does NOT
+// re-panic and does NOT propagate to the errgroup — a crashing executor
+// client degrades into a visible counter (the EQLX-4 brake's future input),
+// never into a dead process. This extends the scope's recoverable-tick
+// posture to the send path.
 func NewSendPool(workers int) *SendPool {
 	return &SendPool{sem: make(chan struct{}, workers), log: slog.Default()}
 }

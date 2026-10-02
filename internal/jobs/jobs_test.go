@@ -200,3 +200,22 @@ func TestSendPoolShutdownAbortsClaim(t *testing.T) {
 		t.Fatal("submit did not return after ctx cancel")
 	}
 }
+
+func TestRunnerMixedFailureStillFails(t *testing.T) {
+	// Canceled-vs-failed distinguishability: job A fails real, job B
+	// observes the cancelled group ctx and returns ctx.Err(). The
+	// normalization must not launder A's failure into a clean stop.
+	r := NewRunner(nil, nil,
+		stubJob{name: "real-failure", run: func(ctx context.Context) error {
+			return errors.New("db gone")
+		}},
+		stubJob{name: "cancelled", run: func(ctx context.Context) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}},
+	)
+	err := r.Run(context.Background())
+	if err == nil || err.Error() != "db gone" {
+		t.Fatalf("err = %v, want the real failure, not a normalized cancel", err)
+	}
+}

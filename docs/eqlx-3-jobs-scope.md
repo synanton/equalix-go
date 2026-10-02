@@ -176,3 +176,20 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
 - Hierarchical dispatch planner (flat mode only; H-mode is Phase-5 scope).
 - Kafka ingestion, gRPC, dead-letter UI, OpenAPI generation.
 - Migrate-on-startup wiring (goose files exist; service phase wires them).
+
+---
+
+## 3a run evidence (pinned definition)
+
+"3a runs" means this scripted scenario, pass or fail — not "the service
+starts":
+
+1. Start the service (test binary or local main) against a fresh database.
+2. Submit N=100 tasks through `POST /api/v1/tasks` across 3 fairness keys
+   (weights 1:2:7, continuous backlog per key).
+3. Observe all 100 reach terminal states via completion webhooks (stub
+   executor auto-completes) within a bounded time.
+4. Show per-key dispatch shares ≈ 10/20/70 from metrics/logs counters.
+5. Show watchdog + timeout sweep ticks firing without errors in logs.
+
+Until this scenario exists and passes, "3a complete" is unclaimable.
