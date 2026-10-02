@@ -4,7 +4,10 @@ import "context"
 
 // TxPorts bundles the repositories bound to one connection/transaction.
 // The pgx adapter implements Transactor by checking out one connection;
-// callers must not retain TxPorts past the Transact callback.
+// callers must not retain TxPorts past the Transact callback. Escape is
+// undefined behavior: detection belongs in the test harness (loud failure),
+// never in production — the adapter must not pay a per-call commit-state
+// check on the dispatch hot path to guard against caller misuse.
 type TxPorts struct {
 	Tasks       TaskRepository
 	Counts      CountsRepository
