@@ -52,6 +52,10 @@ type Task struct {
 	SequenceNumber         int64
 	DependsOnTaskID        string
 	RequiresPreviousResult bool
+	// Version is the optimistic-locking counter (tasks.version). The
+	// adapter increments it on every successful Save and reports
+	// port.ErrVersionConflict on a lost race.
+	Version int64
 }
 
 // EffectiveWeight mirrors Java Task.effectiveWeight: null/non-positive
