@@ -68,6 +68,8 @@ func (c *localCMS) Rebuild(_ context.Context, m map[string]int64) error {
 }
 
 // memMetrics records telemetry in memory until EQLX-6 Prometheus.
+// Not for benchmark paths: single global mutex + maps would flatten any
+// measurement it touches. EQLX-6 replaces with per-shard counters.
 type memMetrics struct {
 	mu          sync.Mutex
 	dispatches  map[string]int
