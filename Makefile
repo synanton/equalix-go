@@ -24,8 +24,13 @@ test-conformance:
 
 # Differential testing against the Java oracle (Phase 5).
 # Usage: make test-differential JAVA_EQUALIX_PATH=/path/to/equalix
+# Fails with a clear message until test/differential exists.
 test-differential:
-	$(GO) test -tags=differential ./test/differential/...
+	@if [ -d test/differential ]; then \
+		$(GO) test -tags=differential ./test/differential/...; \
+	else \
+		echo "test/differential not yet built (Phase 5): no differential evidence exists"; exit 1; \
+	fi
 
 bench:
 	$(GO) test -run=NONE -bench=. -benchmem ./pkg/cms/... ./internal/domain/...

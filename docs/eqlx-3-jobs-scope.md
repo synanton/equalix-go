@@ -16,11 +16,25 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
 - `errgroup.WithContext` over all jobs. Tick errors (query failure,
   lock contention) are **recoverable**: log + continue, never return —
   a transient DB blip must not kill the process.
-- Only **startup errors** fail the group: no DB pool, lock infra broken,
-  CMS warm-up snapshot unreadable.
-- Shutdown: cancel + `context.WithTimeout` grace (configurable, default
-  30s). Jobs select `ctx.Done()` **between iterations, never mid-tick**;
-  an in-flight `Transact` aborts via ctx cancellation (pgx honors it).
+- **Startup-error rule (no exceptions):** startup = pre-launch readiness
+  only — DB pool ping, Redis ping (if CMS mode is redis), lock-infra
+  acquire/release probe. A failed probe returns from `Run` for main to
+  **exit non-zero** (orchestrator retries with its own backoff; the process
+  never invents retry loops). Once goroutines launch, *every* tick error is
+  recoverable, including first-tick connection errors. N consecutive
+  failures (`error_streak_threshold`, default 5) log at error level with
+  the streak count but never kill the process: a crash-loop is worse than
+  a stalled scheduler, and EQLX-6 alerting catches the stall.
+- Shutdown: cancel + `context.WithTimeout` grace (`shutdown_grace`,
+  default 30s). Jobs select `ctx.Done()` **between iterations, never
+  mid-tick**; an in-flight `Transact` aborts via ctx cancellation.
+- **Grace vs worst-case tick (pinned relationship):** grace is a *drain
+  budget*, not an interval multiple — it must cover one in-flight tick
+  plus send-pool drain on the hot loop. Batch caps (`worker_poll_size`,
+  `freeSlots ≤ max_tasks_in_process`) bound work per tick; `Config.Validate`
+  enforces `shutdown_grace ≥ max(10s, 100×dispatcher_interval)` so the two
+  numbers cannot drift apart silently. A pathologically slow DB can still
+  overrun any grace — the rule keeps honest configs honest, not physics.
 - Tick loops use `time.Ticker` (fixed interval, no drift accumulation);
   slow ticks skip beats rather than pile up (drain-on-wakeup).
 

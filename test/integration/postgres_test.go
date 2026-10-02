@@ -426,3 +426,41 @@ func TestListByKeyWithStatusFilter(t *testing.T) {
 		t.Fatalf("filtered = %v, %v", ids(filtered), err)
 	}
 }
+
+func TestLockerMutualExclusion(t *testing.T) {
+	clean(t)
+	dsn := pool.Config().ConnString()
+	a, err := adapter.NewLocker(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	b, err := adapter.NewLocker(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	ok, release, err := a.Lock(ctx, "dispatcher")
+	if err != nil || !ok {
+		t.Fatalf("first lock = %v, %v", ok, err)
+	}
+	// Peer holder denied: non-blocking, no error.
+	ok2, _, err := b.Lock(ctx, "dispatcher")
+	if err != nil || ok2 {
+		t.Fatalf("second lock = %v, %v; want denied", ok2, err)
+	}
+	// Different name unaffected.
+	ok3, release3, err := b.Lock(ctx, "watchdog")
+	if err != nil || !ok3 {
+		t.Fatalf("other-name lock = %v, %v", ok3, err)
+	}
+	release3()
+	// Release is idempotent; reacquire works.
+	release()
+	release()
+	ok4, release4, err := b.Lock(ctx, "dispatcher")
+	if err != nil || !ok4 {
+		t.Fatalf("reacquire = %v, %v", ok4, err)
+	}
+	release4()
+}
