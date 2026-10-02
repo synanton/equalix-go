@@ -36,6 +36,11 @@ make test
 make test-integration
 ```
 
+> **Do not run plain `go mod tidy`.** Under go 1.22, tidy prunes the
+> dependencies of `integration`-tagged test files (e.g. testcontainers) from
+> `go.mod`, silently breaking `make test-integration` for the next person.
+> Add adapter dependencies with explicit `go get module@version` instead.
+
 ---
 
 ## Repository Layout
