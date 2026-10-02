@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 )
 
@@ -13,11 +14,15 @@ import (
 type SendPool struct {
 	sem    chan struct{}
 	failed atomic.Uint64
+	log    *slog.Logger
 }
 
-// NewSendPool returns a pool with capacity workers.
+// NewSendPool returns a pool with capacity workers. Panics in send fns are
+// recovered, logged, and counted as failures: a crashing executor client
+// must degrade into FailedSends (visible to the EQLX-4 brake), never into
+// a dead process — the scope's recoverable-tick posture applies here too.
 func NewSendPool(workers int) *SendPool {
-	return &SendPool{sem: make(chan struct{}, workers)}
+	return &SendPool{sem: make(chan struct{}, workers), log: slog.Default()}
 }
 
 // Free reports currently available send slots (dispatcher claim input).
@@ -26,8 +31,9 @@ func (p *SendPool) Free() int { return cap(p.sem) - len(p.sem) }
 // Submit runs fn(ctx) in a pooled goroutine. Callers must have claimed
 // capacity via Free first; Submit blocks rather than oversubscribing, so a
 // block here means the claim accounting is wrong. ctx carries shutdown:
-// fn must abort on ctx.Done. done is closed when fn returns; failures
-// increment FailedSends.
+// the pool guarantees fn sees a cancelled context, not the absence of new
+// work — fn must abort on ctx.Done. done is closed when fn returns;
+// failures (including recovered panics) increment FailedSends.
 func (p *SendPool) Submit(ctx context.Context, fn func(ctx context.Context) error) (done <-chan struct{}) {
 	c := make(chan struct{})
 	select {
@@ -39,6 +45,12 @@ func (p *SendPool) Submit(ctx context.Context, fn func(ctx context.Context) erro
 	go func() {
 		defer close(c)
 		defer func() { <-p.sem }()
+		defer func() {
+			if v := recover(); v != nil {
+				p.log.Error("send panicked", "panic", v)
+				p.failed.Add(1)
+			}
+		}()
 		if err := fn(ctx); err != nil {
 			p.failed.Add(1)
 		}

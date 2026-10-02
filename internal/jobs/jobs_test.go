@@ -112,14 +112,24 @@ func TestSendPoolCapacityAndFailures(t *testing.T) {
 	if p.Free() != 2 {
 		t.Fatalf("free = %d, want 2", p.Free())
 	}
+	// Both sends block until released; entered gates the Free assertion so
+	// no scheduling luck is involved.
+	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
-	d1 := p.Submit(context.Background(), func(ctx context.Context) error {
+	block := func(ctx context.Context) error {
+		entered <- struct{}{}
 		<-release
 		return nil
-	})
-	d2 := p.Submit(context.Background(), func(ctx context.Context) error {
+	}
+	fail := func(ctx context.Context) error {
+		entered <- struct{}{}
+		<-release
 		return errors.New("executor down")
-	})
+	}
+	d1 := p.Submit(context.Background(), block)
+	d2 := p.Submit(context.Background(), fail)
+	<-entered
+	<-entered
 	if p.Free() != 0 {
 		t.Fatalf("free = %d, want 0 while both held", p.Free())
 	}
@@ -131,6 +141,44 @@ func TestSendPoolCapacityAndFailures(t *testing.T) {
 	}
 	if p.FailedSends() != 1 {
 		t.Fatalf("failed = %d, want 1", p.FailedSends())
+	}
+}
+
+func TestSendPoolPanicCountedNotFatal(t *testing.T) {
+	p := NewSendPool(1)
+	done := p.Submit(context.Background(), func(ctx context.Context) error {
+		panic("executor client bug")
+	})
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pool did not close done after panic")
+	}
+	if p.Free() != 1 {
+		t.Fatalf("free = %d, want slot released after panic", p.Free())
+	}
+	if p.FailedSends() != 1 {
+		t.Fatalf("failed = %d, want panic counted", p.FailedSends())
+	}
+}
+
+func TestRunnerNormalizesShutdownCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := NewRunner(nil, nil, stubJob{name: "cancelled", run: func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err() // the natural clean-stop shape; must exit zero
+	}})
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("err = %v, want nil after clean cancel", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runner did not stop after cancel")
 	}
 }
 

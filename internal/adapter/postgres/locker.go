@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/fnv"
+	"sync/atomic"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -47,8 +48,9 @@ func lockKey(name string) int64 {
 }
 
 // Lock tries the advisory lock without blocking. Held-by-peer →
-// (false, nil, nil). The returned release is idempotent; the connection is
-// held until release, so the lock cannot outlive it.
+// (false, nil, nil). The returned release is idempotent and safe for
+// concurrent use. The connection is held until release, so the lock cannot
+// outlive it.
 func (l *Locker) Lock(ctx context.Context, name string) (bool, func(), error) {
 	conn, err := l.pool.Acquire(ctx)
 	if err != nil {
@@ -63,13 +65,19 @@ func (l *Locker) Lock(ctx context.Context, name string) (bool, func(), error) {
 		conn.Release()
 		return false, nil, nil
 	}
-	var released bool
+	var released atomic.Bool
 	return true, func() {
-		if released {
+		if !released.CompareAndSwap(false, true) {
 			return
 		}
-		released = true
-		_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, lockKey(name))
+		// Unlock failure must destroy, not release: the lock is
+		// session-scoped, so returning a still-locked connection to this
+		// MaxConns:1 pool would deny peers for the process lifetime.
+		// Closing the underlying conn kills the session (and the lock);
+		// Release then drops it instead of reusing it.
+		if _, err := conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, lockKey(name)); err != nil {
+			_ = conn.Conn().Close(context.Background())
+		}
 		conn.Release()
 	}, nil
 }

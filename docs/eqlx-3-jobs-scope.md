@@ -26,8 +26,11 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
   the streak count but never kill the process: a crash-loop is worse than
   a stalled scheduler, and EQLX-6 alerting catches the stall.
 - Shutdown: cancel + `context.WithTimeout` grace (`shutdown_grace`,
-  default 30s). Jobs select `ctx.Done()` **between iterations, never
-  mid-tick**; an in-flight `Transact` aborts via ctx cancellation.
+  default 30s). The loop never interrupts a running tick; shutdown works
+  because tick operations are ctx-aware (pgx aborts transactions on
+  cancellation) — grace covers cancel → operations returning, not tick
+  boundaries. A tick whose operations ignore ctx can overrun grace; every
+  job's tick takes ctx and passes it to every blocking call.
 - **Grace vs worst-case tick (pinned relationship):** grace is a *drain
   budget*, not an interval multiple — it must cover one in-flight tick
   plus send-pool drain on the hot loop. Batch caps (`worker_poll_size`,

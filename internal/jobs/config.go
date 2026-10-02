@@ -90,23 +90,25 @@ func (c Config) Validate() error {
 	if c.PenaltyFactor <= 0 {
 		return fmt.Errorf("jobs: penalty_factor must be positive")
 	}
-	slowest := c.DispatcherInterval
-	for _, iv := range []time.Duration{c.CalculatorInterval, c.WatchdogInterval, c.TimeoutSweepInterval} {
-		if iv > slowest {
-			slowest = iv
-		}
-	}
-	_ = slowest
 	// Drain budget, not interval multiple: grace must cover one in-flight
 	// tick plus send-pool drain on the hot loop. Batch caps
 	// (WorkerPollSize, freeSlots ≤ MaxTasksInProcess) bound work per tick;
-	// grace covers a slow DB on top. Floor 10s keeps testing honest.
+	// grace covers a slow DB on top. The hot loop is the dispatcher, so
+	// the rule keys off its interval; infrequent jobs (watchdog 5m,
+	// timeout sweep) run batch-bounded single iterations measured in
+	// seconds and fall under the 10s floor — their intervals correctly do
+	// not enter the budget. Floor 10s keeps testing honest.
 	if c.ShutdownGrace < 10*time.Second {
 		return fmt.Errorf("jobs: shutdown_grace %v below 10s floor", c.ShutdownGrace)
 	}
 	if c.ShutdownGrace < 100*c.DispatcherInterval {
 		return fmt.Errorf("jobs: shutdown_grace %v must cover 100x dispatcher interval %v",
 			c.ShutdownGrace, c.DispatcherInterval)
+	}
+	if c.MaxQueuedTime <= 0 {
+		// Zero would promote every task on the first tick, silently
+		// destroying fairness; starvation backstop must be positive.
+		return fmt.Errorf("jobs: max_queued_time must be positive")
 	}
 	// Scope §7: timeout-disabled + recovery-enabled is a config error —
 	// with no timeout reference "stuck" is undefined, and a silent skip

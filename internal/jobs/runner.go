@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -50,6 +51,14 @@ func (r *Runner) Run(ctx context.Context) error {
 		g.Go(func() error {
 			r.log.Info("job started", "job", j.Name())
 			err := j.Run(ctx)
+			// A clean stop reads as context.Canceled through every job's
+			// Run (Loop returns after ctx.Done). Normalize it so shutdown
+			// exits zero; anything else is a real startup failure.
+			// Job authors must not rely on this for tick errors — those
+			// never escape Run by contract.
+			if errors.Is(err, context.Canceled) {
+				err = nil
+			}
 			r.log.Info("job stopped", "job", j.Name(), "err", err)
 			return err
 		})
@@ -59,13 +68,15 @@ func (r *Runner) Run(ctx context.Context) error {
 
 // Loop is the shared ticker helper: runs tick immediately, then per
 // interval, until ctx is done. Tick errors increment a streak; the streak
-// logs at error level past threshold and resets on success. ctx is checked
-// between iterations only — never mid-tick.
+// logs at error level past threshold and resets on success. The loop never
+// interrupts a running tick — shutdown works because tick operations are
+// ctx-aware (pgx aborts transactions on cancellation), so grace covers
+// cancel → operations returning, not tick boundaries.
 func Loop(ctx context.Context, log *slog.Logger, name string, interval time.Duration, streakThreshold int, tick func(ctx context.Context) error) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	streak := 0
-	run := func() bool {
+	run := func() {
 		if err := tick(ctx); err != nil {
 			streak++
 			if streak >= streakThreshold {
@@ -73,10 +84,9 @@ func Loop(ctx context.Context, log *slog.Logger, name string, interval time.Dura
 			} else {
 				log.Warn("job tick failed", "job", name, "streak", streak, "err", err)
 			}
-			return false
+			return
 		}
 		streak = 0
-		return true
 	}
 	run()
 	for {
