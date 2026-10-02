@@ -292,6 +292,8 @@ Sources: `domain/service/HierarchicalDispatchPlanner.java`, `domain/service/Hier
 
 One weight-1 task ≈ `quantum` priority units; calibrate λ as credit at a target wait (e.g. `A(30s) = 10 × quantum` → λ = 333 linear / 2912 log / 11.1 power γ=2). `max-queued-time-ms` (default 60000) is the hard backstop for every policy (promotion to priority 0 at tick top). V advances to the highest **aged** position so promoted tasks don't drag V forward (§2.2).
 
+Invocation (EQLX-1 review finding): aging is **opt-in** — enabled iff `policy != none` (default `none` takes the flat `ORDER BY priority` path, zero aging cost). When enabled, the dispatcher runs the aging path **every tick**: it locks up to `2 × max(freeSlots, candidate-pool-size)` candidates (best-by-priority pool plus oldest pool) and re-ranks them in memory. The `BenchmarkRankByAging` baseline (~67µs for a 400-candidate pool) is therefore the per-tick cost of the aging path, not an occasional backstop — relevant for EQLX-3 dispatch-loop budgets. Quota filtering applies before ranking (see CORRECTION-1).
+
 Sources: `domain/service/AgingService.java`, `domain/model/AgingPolicy.java`, `docs/configuration.md`.
 
 ### 6.4 Sequential execution mode
@@ -472,7 +474,10 @@ Java Micrometer names (`docs/design.md` §12) that equalix-go mirrors (Go names 
 - [ ] **GAP-3 (closed in this spec):** watchdog two-phase rebuild + drift publication — extracted from `WatchdogService`/`CmsDriftReport` (§8).
 - [ ] **GAP-4 (open, non-blocking for Phase 1):** clock-skew handling has no explicit Java mechanism; §11 records the analysis (DB-time SQL + monotonic upserts limit exposure to aging/timeout timing). Revisit in EQLX-3 with a fault-injection test.
 - [ ] **GAP-5 (open, deferred to EQLX-6):** `/healthz` vs `/readyz` semantics (what fails readiness: DB? Redis? both?) — Java only has actuator health/info. Decide during operability work; record in `docs/runbook.md`.
-- [ ] **GAP-6 (open, deferred to EQLX-2):** Go migration tooling (goose vs golang-migrate) and whether V2/shedlock artifacts appear in any form — decision in EQLX-1 with the module skeleton.
+- [x] **DECISION-1 (EQLX-1, closed): CMS decay.** Replicate code behavior (no decay), not design prose. Rationale: code is authoritative per the extraction rules; adding decay would change fairness dynamics and break differential parity. Decay, if ever wanted, is a new feature with its own spec section — not parity work. Implemented in `pkg/cms` (no decay paths).
+- [x] **DECISION-2 (EQLX-1, closed): `retry_count`.** Keep the column and the API field (`Task.RetryCount`, `retryCount` in `TaskStatusResponse`), but invent no retry semantics: the scheduler never increments it (Java parity — `CreateTaskUseCase` sets 0, nothing else writes). Retry policy stays with the remote executor; resubmission is a new task.
+- [x] **CORRECTION-1 (EQLX-1 review, fixed): aging candidate selection omitted quota.** The initial Go `RankByAging` ranked without `maxPerClient` filtering — a parity bug, not a judgment call: both Java candidate queries (`findAndLockDispatchable`, `findAndLockOldestDispatchable`) take `maxPerClient`, so keys at quota never enter the aging pool. Fixed in `a3287e7` with `TestRankByAgingRespectsQuota`. Recorded here (not as DECISION-N) to keep "we chose" distinct from "we got wrong and fixed".
+- [ ] **GAP-6 (open, deferred to EQLX-2):** Go migration tooling (goose vs golang-migrate) and whether V2/shedlock artifacts appear in any form — deferred because the EQLX-1 module skeleton needs no migrations yet; decide with the first Postgres adapter.
 
 ---
 
