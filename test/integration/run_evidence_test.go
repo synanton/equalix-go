@@ -69,6 +69,7 @@ func (m *memMetrics) RecordCompletion(_, _ string, _ int64) {
 func (m *memMetrics) ObserveDispatchLatency(float64) {}
 func (m *memMetrics) SetRPS(float64)                 {}
 func (m *memMetrics) PublishDrift(map[string]int64)  {}
+func (m *memMetrics) SetQueueDepth(int)              {}
 
 func (m *memMetrics) completed() int {
 	m.mu.Lock()

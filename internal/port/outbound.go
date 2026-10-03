@@ -53,6 +53,10 @@ type Metrics interface {
 	ObserveDispatchLatency(seconds float64)
 	// SetRPS publishes the adaptive controller's current cap (gauge source).
 	SetRPS(rps float64)
+	// SetQueueDepth publishes the RECEIVED backlog size
+	// (received_queue_depth gauge source). Sampled by the calculator only
+	// on saturated ticks, never on the hot path.
+	SetQueueDepth(n int)
 	// PublishDrift publishes a watchdog drift report: per-key drift plus
 	// aggregates (spec §8). The adapter truncates per-key series per its
 	// drift-metric-max-keys config — the caller passes the full report.

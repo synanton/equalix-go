@@ -14,6 +14,7 @@ import (
 // Counts/VT reuse the domain reference implementations.
 type fakeBacking struct {
 	mu     sync.Mutex
+	now    time.Time
 	tasks  map[string]*domain.Task
 	counts *domain.Counts
 	vt     *domain.Store
@@ -22,6 +23,7 @@ type fakeBacking struct {
 
 func newFakeBacking() *fakeBacking {
 	return &fakeBacking{
+		now:    time.Now(),
 		tasks:  map[string]*domain.Task{},
 		counts: domain.NewCounts(),
 		vt:     domain.NewStore(),
@@ -98,12 +100,43 @@ func (f *fakeTasks) FindStarved(_ context.Context, _ time.Duration, _ int) ([]*d
 	return nil, nil
 }
 
-func (f *fakeTasks) FindTimedOut(_ context.Context, _ time.Duration, _ int) ([]*domain.Task, error) {
-	return nil, nil
+func (f *fakeTasks) FindTimedOut(_ context.Context, olderThan time.Duration, limit int) ([]*domain.Task, error) {
+	f.b.mu.Lock()
+	defer f.b.mu.Unlock()
+	var out []*domain.Task
+	for _, t := range f.b.tasks {
+		if t.Status.IsInFlight() && f.b.now.Sub(t.UpdatedAt) > olderThan {
+			out = append(out, t)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeTasks) CountInFlight(_ context.Context) (map[string]int, error) {
-	return f.b.counts.Snapshot(), nil
+	f.b.mu.Lock()
+	defer f.b.mu.Unlock()
+	out := map[string]int{}
+	for _, t := range f.b.tasks {
+		if t.Status.IsInFlight() {
+			out[t.FairnessKey]++
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeTasks) CountReceived(_ context.Context) (int, error) {
+	f.b.mu.Lock()
+	defer f.b.mu.Unlock()
+	n := 0
+	for _, t := range f.b.tasks {
+		if t.Status == domain.StatusReceived {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (f *fakeTasks) FindNextSequential(_ context.Context, _ string, _ int64) (*domain.Task, error) {
@@ -247,6 +280,7 @@ func (fakeMetrics) RecordCompletion(string, string, int64) {}
 func (fakeMetrics) ObserveDispatchLatency(float64)         {}
 func (fakeMetrics) SetRPS(float64)                         {}
 func (fakeMetrics) PublishDrift(map[string]int64)          {}
+func (fakeMetrics) SetQueueDepth(int)                      {}
 
 type rig struct {
 	backing *fakeBacking

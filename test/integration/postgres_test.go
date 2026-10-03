@@ -362,11 +362,20 @@ func TestStarvedAndTimedOut(t *testing.T) {
 		t.Fatalf("starved = %v", ids(starved))
 	}
 	// Make it in-flight long ago, then find via timeout scan.
+	// The updated_at trigger would override a plain backdate UPDATE, so
+	// the trigger is disabled for this statement only (testcontainers runs
+	// as superuser; production code never disables triggers).
 	old.Status = domain.StatusDispatched
 	if err := tasks.Save(ctx, old); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE tasks DISABLE TRIGGER trg_set_updated_at`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `UPDATE tasks SET updated_at = now() - interval '2 hours' WHERE id = $1::uuid`, uuid(60)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE tasks ENABLE TRIGGER trg_set_updated_at`); err != nil {
 		t.Fatal(err)
 	}
 	timed, err := tasks.FindTimedOut(ctx, time.Hour, 10)

@@ -26,12 +26,12 @@ func (s *CountsStore) Decrement(ctx context.Context, key string) error {
 }
 
 func (s *CountsStore) add(ctx context.Context, key string, delta int) error {
+	// updated_at DB-owned (trigger): omitted on write, DEFAULT on insert.
 	_, err := s.q.Exec(ctx, `INSERT INTO client_counts AS cc
-        (fairness_key, in_flight_count, updated_at)
-        VALUES ($1, GREATEST(0, $2), now())
+        (fairness_key, in_flight_count)
+        VALUES ($1, GREATEST(0, $2))
         ON CONFLICT (fairness_key) DO UPDATE SET
-            in_flight_count = GREATEST(0, cc.in_flight_count + $2),
-            updated_at = now()`, key, delta)
+            in_flight_count = GREATEST(0, cc.in_flight_count + $2)`, key, delta)
 	if err != nil {
 		return fmt.Errorf("postgres: counts add %s: %w", key, err)
 	}
@@ -56,10 +56,10 @@ func (s *CountsStore) Set(ctx context.Context, key string, n int) error {
 		n = 0
 	}
 	_, err := s.q.Exec(ctx, `INSERT INTO client_counts AS cc
-        (fairness_key, in_flight_count, updated_at)
-        VALUES ($1, $2, now())
+        (fairness_key, in_flight_count)
+        VALUES ($1, $2)
         ON CONFLICT (fairness_key) DO UPDATE SET
-            in_flight_count = $2, updated_at = now()`, key, n)
+            in_flight_count = $2`, key, n)
 	if err != nil {
 		return fmt.Errorf("postgres: counts set %s: %w", key, err)
 	}
@@ -91,8 +91,8 @@ var _ port.SequenceStateRepository = (*SequenceStore)(nil)
 
 func (s *SequenceStore) FindOrCreate(ctx context.Context, key string) (*domain.SequenceState, error) {
 	_, err := s.q.Exec(ctx, `INSERT INTO client_sequence_state
-        (fairness_key, last_completed_sequence, last_dispatched_sequence, updated_at)
-        VALUES ($1, 0, 0, now()) ON CONFLICT (fairness_key) DO NOTHING`, key)
+        (fairness_key, last_completed_sequence, last_dispatched_sequence)
+        VALUES ($1, 0, 0) ON CONFLICT (fairness_key) DO NOTHING`, key)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: sequence ensure %s: %w", key, err)
 	}
@@ -103,7 +103,7 @@ func (s *SequenceStore) Save(ctx context.Context, st *domain.SequenceState) erro
 	_, err := s.q.Exec(ctx, `UPDATE client_sequence_state SET
             last_completed_sequence = $2, last_dispatched_sequence = $3,
             current_executing_task_id = $4::uuid, is_blocked = $5,
-            blocked_at = $6, updated_at = now()
+            blocked_at = $6
         WHERE fairness_key = $1`,
 		st.FairnessKey, st.LastCompletedSequence, st.LastDispatchedSequence,
 		nullableUUIDorNil(st.CurrentExecutingID, st.HasExecuting),

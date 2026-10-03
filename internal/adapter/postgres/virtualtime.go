@@ -30,11 +30,10 @@ func (s *VirtualTimeStore) Reserve(ctx context.Context, key string, quantum, wei
 	}
 	var tag float64
 	err = s.q.QueryRow(ctx, `INSERT INTO client_virtual_time AS cvt
-        (fairness_key, virtual_time, virtual_finish, updated_at)
-        VALUES ($1, $2::float8, $2::float8 + $3::float8, now())
+        (fairness_key, virtual_time, virtual_finish)
+        VALUES ($1, $2::float8, $2::float8 + $3::float8)
         ON CONFLICT (fairness_key) DO UPDATE SET
-            virtual_finish = GREATEST(cvt.virtual_finish, $2::float8) + $3::float8,
-            updated_at = now()
+            virtual_finish = GREATEST(cvt.virtual_finish, $2::float8) + $3::float8
         RETURNING virtual_finish`, key, v, quantum/w).Scan(&tag)
 	if err != nil {
 		return 0, fmt.Errorf("postgres: reserve tag %s: %w", key, err)
@@ -47,12 +46,11 @@ func (s *VirtualTimeStore) RecordDispatch(ctx context.Context, tags, credits map
 	first := true
 	for key, tag := range tags {
 		_, err := s.q.Exec(ctx, `INSERT INTO client_virtual_time AS cvt
-            (fairness_key, virtual_time, virtual_finish, updated_at)
-            VALUES ($1, $2, $2, now())
+            (fairness_key, virtual_time, virtual_finish)
+            VALUES ($1, $2, $2)
             ON CONFLICT (fairness_key) DO UPDATE SET
                 virtual_time = GREATEST(cvt.virtual_time, $2),
-                virtual_finish = GREATEST(cvt.virtual_finish, $2),
-                updated_at = now()`, key, tag)
+                virtual_finish = GREATEST(cvt.virtual_finish, $2)`, key, tag)
 		if err != nil {
 			return fmt.Errorf("postgres: advance key %s: %w", key, err)
 		}
@@ -64,11 +62,10 @@ func (s *VirtualTimeStore) RecordDispatch(ctx context.Context, tags, credits map
 		return nil
 	}
 	_, err := s.q.Exec(ctx, `INSERT INTO scheduler_virtual_clock AS svc
-        (id, virtual_time, updated_at)
-        VALUES (1, $1, now())
+        (id, virtual_time)
+        VALUES (1, $1)
         ON CONFLICT (id) DO UPDATE SET
-            virtual_time = GREATEST(svc.virtual_time, $1),
-            updated_at = now()`, peak)
+            virtual_time = GREATEST(svc.virtual_time, $1)`, peak)
 	if err != nil {
 		return fmt.Errorf("postgres: advance system V: %w", err)
 	}
