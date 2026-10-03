@@ -25,7 +25,6 @@ func TestConfigValidate(t *testing.T) {
 		{"no penalty", func(c *Config) { c.PenaltyFactor = 0 }},
 		{"grace below floor", func(c *Config) { c.ShutdownGrace = 5 * time.Second }},
 		{"grace below 100x dispatcher", func(c *Config) { c.DispatcherInterval = time.Second; c.ShutdownGrace = 30 * time.Second }},
-		{"timeout disabled with recovery", func(c *Config) { c.TaskTimeout = 0 }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,12 +35,12 @@ func TestConfigValidate(t *testing.T) {
 			}
 		})
 	}
-	// Timeout disabled is fine when recovery is off too.
+	// Timeout disabled simply disables the sweep (no recovery knob exists —
+	// CORRECTION-2: Java has no recovery service).
 	c := base
 	c.TaskTimeout = 0
-	c.RecoveryEnabled = false
 	if err := c.Validate(); err != nil {
-		t.Fatalf("disabled pair should validate: %v", err)
+		t.Fatalf("disabled timeout should validate: %v", err)
 	}
 }
 

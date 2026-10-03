@@ -102,13 +102,14 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
   metric cap). If operators want alerting thresholds, that's EQLX-6
   runbook material, not scheduler behavior.
 
-### 5. Timeout sweep: config interval, Java-unknown cadence
+### 5. Timeout sweep: dispatcher cadence (CORRECTION-2)
 
 - `FindTimedOut(task_timeout)` → `TIMEOUT` + `LastError` + release
   (counts/CMS) + sequential block flag, per tick of its own ticker.
-- Cadence default 30s is a **chosen value, parity unknown** (Java's
-  `TaskTimeoutScheduler` fixed delay was not extracted). Recorded here so
-  EQLX-5 can flag it if differential timing diverges.
+- Cadence corrected to Java parity: `TaskTimeoutScheduler` runs at
+  `dispatcher-interval` (50ms), batch `worker-poll-size` — the earlier
+  "30s, parity unknown" was a guess made before the scheduler annotation
+  was read. No separate interval knob (see CORRECTION-2 commit).
 
 ### 6. Locker: session-scope advisory locks, crash-safe by close
 
@@ -132,23 +133,6 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
   from TCP close, matching Java's ShedLock-over-JDBC closely enough that
   no spec change is needed.
 
-### 7. Recovery: old-only, lock-guarded
-
-- At startup, under `Locker("recovery")`: mark `TIMEOUT` every
-  DISPATCHED/COMMITTED task with `updated_at` older than
-  `startup − task_timeout`, releasing slots. **Old-only**: a fresh
-  in-flight row may belong to a live peer — touching it would steal work.
-- **"Old" threshold (pinned): strictly greater than the sweep threshold —
-  `updated_at < startup − (task_timeout + 60s)`.** The 60s margin keeps
-  recovery racing the timeout sweep on the same tasks: anything the sweep
-  could legitimately claim belongs to the sweep, not to startup recovery.
-- **Timeout-disabled + recovery-enabled is a startup config error
-  (pinned): reject, don't skip.** With no timeout reference there is no
-  non-arbitrary definition of "stuck," and a silent no-op would leave
-  DISPATCHED tasks stranded forever while logging reassurance. Fail fast
-  with a clear message naming both keys.
-- Steady-state stuck tasks belong to the timeout sweep, not recovery.
-
 ---
 
 ## Non-blocking
@@ -161,8 +145,10 @@ items ride along. DECISION/ceiling references point at `docs/spec.md`.
   EQLX-3-out (cross-instance fairness is Phase-5 differential scope).
 - **Config**: plain Go struct with Java defaults (spec §10); YAML/env
   binding is EQLX-6. New keys: `dispatch_workers` (32), `shutdown_grace`
-  (30s), `timeout_sweep_interval` (30s), `error_streak_threshold` (5),
-  `penalty_factor` (1000.0), `recovery_enabled` (true).
+  (30s), `error_streak_threshold` (5),
+  `penalty_factor` (1000.0). (`timeout_sweep_interval` deleted: the sweep
+  ticks on `dispatcher_interval`, Java parity. `recovery_enabled` deleted
+  with §7.)
 - **Completion ownership**: the chi handler keeps serving the webhook;
   jobs do not take it over in this phase — but the DB half
   (`Save` + `Decrement`) moves into `Transact`, closing window (1) from

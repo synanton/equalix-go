@@ -19,8 +19,6 @@ type Config struct {
 	CalculatorInterval time.Duration
 	// Watchdog interval (Java watchdog.interval-minutes, 5m).
 	WatchdogInterval time.Duration
-	// TimeoutSweepInterval is NEW (chosen, parity unknown — scope §5).
-	TimeoutSweepInterval time.Duration
 	// MaxTasksInProcess caps global in-flight (Java 5000).
 	MaxTasksInProcess int
 	// MaxPerClientQuota caps per-key in-flight, 0 disables (Java 500).
@@ -41,8 +39,6 @@ type Config struct {
 	// PenaltyFactor is the fixed in-flight pressure until EQLX-4 wires the
 	// live controller (NEW, default 1000.0 = 1000/initial-rps Java parity).
 	PenaltyFactor float64
-	// RecoveryEnabled runs startup recovery (NEW, default true).
-	RecoveryEnabled bool
 }
 
 // DefaultConfig returns Java defaults plus the new keys' defaults.
@@ -51,7 +47,6 @@ func DefaultConfig() Config {
 		DispatcherInterval:   50 * time.Millisecond,
 		CalculatorInterval:   100 * time.Millisecond,
 		WatchdogInterval:     5 * time.Minute,
-		TimeoutSweepInterval: 30 * time.Second,
 		MaxTasksInProcess:    5000,
 		MaxPerClientQuota:    500,
 		WorkerPollSize:       100,
@@ -61,7 +56,6 @@ func DefaultConfig() Config {
 		ShutdownGrace:        30 * time.Second,
 		ErrorStreakThreshold: 5,
 		PenaltyFactor:        1000.0,
-		RecoveryEnabled:      true,
 	}
 }
 
@@ -71,8 +65,10 @@ func DefaultConfig() Config {
 // so grace must cover a multiple of every job interval, and batches must
 // stay within sane bounds.
 func (c Config) Validate() error {
+	// Timeout sweep ticks on DispatcherInterval (Java parity:
+	// TaskTimeoutScheduler uses dispatcher-interval). No separate knob.
 	if c.DispatcherInterval <= 0 || c.CalculatorInterval <= 0 ||
-		c.WatchdogInterval <= 0 || c.TimeoutSweepInterval <= 0 {
+		c.WatchdogInterval <= 0 {
 		return fmt.Errorf("jobs: intervals must be positive")
 	}
 	if c.WorkerPollSize < 1 || c.WorkerPollSize > 10000 {
@@ -110,11 +106,8 @@ func (c Config) Validate() error {
 		// destroying fairness; starvation backstop must be positive.
 		return fmt.Errorf("jobs: max_queued_time must be positive")
 	}
-	// Scope §7: timeout-disabled + recovery-enabled is a config error —
-	// with no timeout reference "stuck" is undefined, and a silent skip
-	// would strand DISPATCHED tasks forever.
-	if c.TaskTimeout <= 0 && c.RecoveryEnabled {
-		return fmt.Errorf("jobs: recovery requires task_timeout > 0 (timeout disabled + recovery enabled is invalid)")
-	}
+	// No recovery knob: Java has no recovery service (CORRECTION-2) —
+	// startup does CMS warm-up, the timeout sweep owns stuck tasks from
+	// its first tick. TaskTimeout <= 0 simply disables the sweep.
 	return nil
 }
