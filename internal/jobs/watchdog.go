@@ -52,6 +52,13 @@ func (w *Watchdog) TickForTest(ctx context.Context) error { return w.tick(ctx) }
 // Any error aborts the run — the next tick retries from phase 1, never
 // resuming mid-map (a half-published report must not pair with a
 // half-rebuilt CMS).
+//
+// Concurrency (pinned decision): the tick is NOT lock-guarded. Repair is
+// idempotent (both instances write the same actuals), so concurrent ticks
+// converge; only PublishDrift double-fires, and double metric samples are
+// accepted — Prometheus scrapes both, aggregates absorb it. Lock-guarding
+// the tick would serialize a 200ms operation behind lock acquisition for
+// no correctness gain.
 func (w *Watchdog) tick(ctx context.Context) error {
 	// Phase 1: authoritative snapshot + counts repair (thresholdless —
 	// any mismatch is a bug, repair is idempotent).

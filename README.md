@@ -23,8 +23,8 @@ This is **not a language port**. The Java code is the behavioral reference; the 
 | Domain core (virtual time, priority, CMS, selection) | ✅ | ✅ | ✅ (1:2:7 + seeded) | ✅ (hot-path benches) | ⬜ (Phase 5) |
 | Postgres adapter | ✅ | ✅ (testcontainers) | ⬜ | ⬜ | ⬜ (Phase 5) |
 | HTTP surface | ✅ | ✅ (contract tests) | ⬜ | ⬜ | ⬜ (Phase 5) |
-| Jobs (dispatcher, calculator) | ✅ | ✅ | ⬜ | ⬜ | ⬜ (Phase 5) |
-| Jobs (watchdog, timeout, recovery) | ⬜ (stubs) | ⬜ | ⬜ | ⬜ | ⬜ (Phase 5) |
+| Jobs (dispatcher, calculator, watchdog, timeout) | ✅ | ✅ | ⬜ | ⬜ | ⬜ (Phase 5) |
+| Jobs (recovery) | — (no such service; CORRECTION-2) | — | — | — | — |
 
 `⬜` = not yet; nothing in this table is claimed before its evidence exists.
 

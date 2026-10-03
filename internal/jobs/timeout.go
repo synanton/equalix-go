@@ -25,6 +25,11 @@ type TimeoutDeps struct {
 }
 
 // Timeout marks over-age in-flight tasks TIMEOUT and releases slots.
+// Canonical sweep method is Tasks.FindTimedOut (pre-existing EQLX-2 port:
+// duration in, DB-time `now() - interval` in SQL, no caller clock). The
+// 3b scope prose once named a hypothetical SweepTimeouts(ctx, now) — no
+// such port method was ever defined, so no rename occurred; this doc is
+// the record that FindTimedOut is the single canonical name EQLX-5 reads.
 type Timeout struct {
 	deps TimeoutDeps
 }
