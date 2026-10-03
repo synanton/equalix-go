@@ -105,3 +105,15 @@ func Loop(ctx context.Context, log *slog.Logger, name string, interval time.Dura
 		}
 	}
 }
+
+// discardMetrics drops telemetry. Constructors substitute it for a nil
+// Metrics so jobs never nil-panic on an unwired port; production always
+// passes the real recorder.
+type discardMetrics struct{}
+
+func (discardMetrics) RecordDispatch(string)                  {}
+func (discardMetrics) RecordCompletion(string, string, int64) {}
+func (discardMetrics) ObserveDispatchLatency(float64)         {}
+func (discardMetrics) SetRPS(float64)                         {}
+func (discardMetrics) SetQueueDepth(int)                      {}
+func (discardMetrics) PublishDrift(map[string]int64)          {}

@@ -30,6 +30,9 @@ type TaskRepository interface {
 	// FindAndLockDispatchable locks up to limit QUEUED non-sequential
 	// tasks under quota, ordered by (priority, createdAt, id).
 	// maxPerClient <= 0 disables the per-key ceiling (spec §5.1).
+	// Selection carries no time predicate — no caller clock involved,
+	// consistent with the DB-time `now() - interval` predicates in
+	// FindStarved/FindTimedOut (no clock-skew class across instances).
 	FindAndLockDispatchable(ctx context.Context, limit, maxPerClient int) ([]*domain.Task, error)
 	// FindStarved returns QUEUED non-sequential tasks older than
 	// olderThan, oldest first (promotion scan, spec §5.1). Parity note:
@@ -44,6 +47,10 @@ type TaskRepository interface {
 	// (watchdog snapshot input, spec §8). Full GROUP BY scan like Java;
 	// no paging (see CountsRepository.All note on cardinality).
 	CountInFlight(ctx context.Context) (map[string]int, error)
+	// CountReceived returns the RECEIVED backlog size (calculator-overflow
+	// gauge input, 3b scope §3). Sampled only on saturated calculator
+	// ticks; served by idx_tasks_status_created_at, never on the hot path.
+	CountReceived(ctx context.Context) (int, error)
 	// FindNextSequential returns the QUEUED sequential task for key at
 	// sequence number seq, or (nil, nil) when absent.
 	FindNextSequential(ctx context.Context, key string, seq int64) (*domain.Task, error)

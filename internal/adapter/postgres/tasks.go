@@ -163,6 +163,17 @@ func (s *TaskStore) CountInFlight(ctx context.Context) (map[string]int, error) {
 	return out, rows.Err()
 }
 
+// CountReceived returns the RECEIVED backlog size (single indexed COUNT
+// over idx_tasks_status_created_at; called only on saturated ticks).
+func (s *TaskStore) CountReceived(ctx context.Context) (int, error) {
+	var n int
+	err := s.q.QueryRow(ctx, `SELECT COUNT(*) FROM tasks WHERE status = 'RECEIVED'`).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("postgres: count received: %w", err)
+	}
+	return n, nil
+}
+
 // FindNextSequential returns the QUEUED sequential task at (key, seq) or
 // (nil, nil) when absent.
 func (s *TaskStore) FindNextSequential(ctx context.Context, key string, seq int64) (*domain.Task, error) {
