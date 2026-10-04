@@ -13,7 +13,12 @@
 -- +goose Up
 CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
 BEGIN
-    NEW.updated_at = now();
+    -- UPDATE: unconditional DB clock (no legitimate writer sets this).
+    -- INSERT: fill only when NULL, so backfills and tests inserting
+    -- explicit timestamps keep working without disabling the trigger.
+    IF TG_OP = 'UPDATE' OR NEW.updated_at IS NULL THEN
+        NEW.updated_at = now();
+    END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -27,7 +32,7 @@ BEGIN
     ] LOOP
         EXECUTE format(
             'DROP TRIGGER IF EXISTS trg_set_updated_at ON %I; ' ||
-            'CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON %I ' ||
+            'CREATE TRIGGER trg_set_updated_at BEFORE INSERT OR UPDATE ON %I ' ||
             'FOR EACH ROW EXECUTE FUNCTION set_updated_at()',
             tbl, tbl);
     END LOOP;
