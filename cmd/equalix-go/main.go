@@ -22,6 +22,7 @@ import (
 
 	chiadapter "github.com/synanton/equalix-go/internal/adapter/http"
 	pgadapter "github.com/synanton/equalix-go/internal/adapter/postgres"
+	"github.com/synanton/equalix-go/internal/adaptive"
 	"github.com/synanton/equalix-go/internal/domain"
 	"github.com/synanton/equalix-go/internal/jobs"
 	"github.com/synanton/equalix-go/internal/port"
@@ -94,13 +95,6 @@ func (m *memMetrics) SetRPS(r float64)                 { m.mu.Lock(); m.rps = r;
 func (m *memMetrics) PublishDrift(_ map[string]int64)  {}
 func (m *memMetrics) SetQueueDepth(_ int)              {}
 
-// TODO(EQLX-4): placeholder — reports a fixed 1.0, not a measured rate.
-// Wire to the adaptive controller when it lands; until then GET /status
-// currentRps is a constant, not a metric.
-type fixedRPS struct{ rps float64 }
-
-func (f fixedRPS) CurrentRPS() float64 { return f.rps }
-
 func toInt64(m map[string]int) map[string]int64 {
 	out := make(map[string]int64, len(m))
 	for k, v := range m {
@@ -147,10 +141,17 @@ func run() error {
 
 	metrics := &memMetrics{dispatches: map[string]int{}, completions: map[string]int{}}
 	cmsketch := &localCMS{s: cms.New(65536, 5)}
+	// Throttle owns its own send pool as the FailedSends source
+	// (DECISION-5 wiring: pool → controller, no wrapper).
+	sendpool := jobs.NewSendPool(cfg.DispatchWorkers)
+	controller, err := adaptive.New(adaptive.DefaultConfig(), domain.SystemClock{}, sendpool)
+	if err != nil {
+		return fmt.Errorf("adaptive controller: %w", err)
+	}
 	handler := chiadapter.NewRouter(chiadapter.Deps{
 		Tasks: stores.Tasks, Counts: stores.Counts, Sequences: stores.Sequences,
 		CMS: cmsketch, Metrics: metrics,
-		RPS: fixedRPS{rps: 1}, Clock: domain.SystemClock{},
+		RPS: controller, Throttle: controller, Clock: domain.SystemClock{},
 		APIKey: *apiKey, MaxPayloadBytes: *maxPayload,
 	})
 
@@ -203,7 +204,7 @@ func run() error {
 		jobs.NewCalculator(jobs.CalculatorDeps{
 			Tasks: stores.Tasks, Sequences: stores.Sequences,
 			VT: stores.VirtualTime, CMS: cmsketch,
-			Metrics: metrics, Config: cfg,
+			Metrics: metrics, Throttle: controller, Config: cfg,
 		}),
 		jobs.NewWatchdog(jobs.WatchdogDeps{
 			Tasks: stores.Tasks, Counts: stores.Counts, CMS: cmsketch,

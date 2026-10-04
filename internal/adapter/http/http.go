@@ -23,6 +23,14 @@ type RPSReader interface {
 	CurrentRPS() float64
 }
 
+// ThrottleRecorder receives completion samples for the adaptive
+// controller. Optional (nil = unwired, tests); *adaptive.Controller
+// implements it. Separate from RPSReader (read path) so the write path
+// is explicit and fakes stay trivial: readers don't imply writers.
+type ThrottleRecorder interface {
+	RecordCompletion(durationMs int64, success bool)
+}
+
 // Deps wires a Handler. MaxPayloadBytes mirrors app.queue.max-payload-bytes
 // (default 1048576); APIKey mirrors app.security.api-key.
 type Deps struct {
@@ -32,6 +40,7 @@ type Deps struct {
 	CMS             port.CMSStore
 	Metrics         port.Metrics
 	RPS             RPSReader
+	Throttle        ThrottleRecorder
 	Clock           domain.Clock
 	APIKey          string
 	MaxPayloadBytes int
