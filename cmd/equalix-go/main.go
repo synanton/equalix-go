@@ -20,6 +20,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	executor "github.com/synanton/equalix-go/internal/adapter/executor"
 	chiadapter "github.com/synanton/equalix-go/internal/adapter/http"
 	pgadapter "github.com/synanton/equalix-go/internal/adapter/postgres"
 	"github.com/synanton/equalix-go/internal/adaptive"
@@ -109,6 +110,7 @@ func run() error {
 		addr       = flag.String("addr", ":8080", "HTTP listen address")
 		apiKey     = flag.String("api-key", os.Getenv("EQUALIX_API_KEY"), "API key, prefer EQUALIX_API_KEY env (flag value is visible in ps)")
 		maxPayload = flag.Int("max-payload-bytes", 1048576, "ingest payload cap (Java app.queue.max-payload-bytes)")
+		execBase   = flag.String("executor-base-url", os.Getenv("EQUALIX_EXECUTOR_BASE_URL"), "executor base URL receiving POST /tasks/{id}/execute (or EQUALIX_EXECUTOR_BASE_URL)")
 	)
 	flag.Parse()
 
@@ -198,9 +200,10 @@ func run() error {
 		slog.Info("cms warmed up", "keys", len(actual))
 	}
 
-	// TODO(executor): wire the dispatcher once a port.Executor adapter
-	// exists. Until then dispatch runs only in tests (TickForTest).
-	runner := jobs.NewRunner(slog.Default(), nil,
+	// Dispatcher needs an executor to send to. Without --executor-base-url
+	// it stays unwired by explicit decision (dispatch logic stays covered
+	// by TickForTest); with one, the full pipeline runs.
+	allJobs := []jobs.Job{
 		jobs.NewCalculator(jobs.CalculatorDeps{
 			Tasks: stores.Tasks, Sequences: stores.Sequences,
 			VT: stores.VirtualTime, CMS: cmsketch,
@@ -215,7 +218,19 @@ func run() error {
 			Sequences: stores.Sequences, CMS: cmsketch,
 			Config: cfg, Clock: domain.SystemClock{},
 		}),
-	)
+	}
+	if *execBase != "" {
+		allJobs = append(allJobs, jobs.NewDispatcher(jobs.DispatcherDeps{
+			Tx: stores, Tasks: stores.Tasks, Counts: stores.Counts,
+			CMS:      cmsketch,
+			Executor: executor.NewHTTPExecutor(*execBase, 5*time.Second),
+			Metrics:  metrics, Pool: sendpool, Throttle: controller,
+			Config: cfg,
+		}))
+	} else {
+		slog.Warn("no executor configured; dispatcher unwired (ingest + tagging only)")
+	}
+	runner := jobs.NewRunner(slog.Default(), nil, allJobs...)
 
 	server := &http.Server{Addr: *addr, Handler: handler}
 	serverErr := make(chan error, 1)

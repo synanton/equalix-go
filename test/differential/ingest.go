@@ -23,11 +23,11 @@ import (
 // instant — correct behavior (the scheduler waits for the right moment),
 // not a hang. Always pass offsets resolved against run start, never
 // absolute timestamps; see the workload format's offset rules.
-func SubmitTask(ctx context.Context, client *http.Client, baseURL, apiKey string, t Task, submittedAt time.Time) (time.Time, error) {
+func SubmitTask(ctx context.Context, client *http.Client, baseURL, apiKey string, t Task, submittedAt time.Time) (time.Time, string, error) {
 	if wait := time.Until(submittedAt); wait > 0 {
 		select {
 		case <-ctx.Done():
-			return time.Time{}, ctx.Err()
+			return time.Time{}, "", ctx.Err()
 		case <-time.After(wait):
 		}
 	}
@@ -40,40 +40,40 @@ func SubmitTask(ctx context.Context, client *http.Client, baseURL, apiKey string
 	_ = submittedAt
 	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/api/v1/tasks", bytes.NewReader(body))
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", apiKey)
 	resp, err := client.Do(req)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("differential: ingest %s: %w", t.ID, err)
+		return time.Time{}, "", fmt.Errorf("differential: ingest %s: %w", t.ID, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
-		return time.Time{}, fmt.Errorf("differential: ingest %s: status %d", t.ID, resp.StatusCode)
+		return time.Time{}, "", fmt.Errorf("differential: ingest %s: status %d", t.ID, resp.StatusCode)
 	}
 	var id string
 	if err := json.NewDecoder(resp.Body).Decode(&id); err != nil {
-		return time.Time{}, fmt.Errorf("differential: decode ingest id: %w", err)
+		return time.Time{}, "", fmt.Errorf("differential: decode ingest id: %w", err)
 	}
 	get, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/api/v1/tasks/"+id, nil)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, "", err
 	}
 	get.Header.Set("X-API-Key", apiKey)
 	gresp, err := client.Do(get)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("differential: read back %s: %w", id, err)
+		return time.Time{}, "", fmt.Errorf("differential: read back %s: %w", id, err)
 	}
 	defer gresp.Body.Close()
 	if gresp.StatusCode != http.StatusOK {
-		return time.Time{}, fmt.Errorf("differential: read back %s: status %d", id, gresp.StatusCode)
+		return time.Time{}, "", fmt.Errorf("differential: read back %s: status %d", id, gresp.StatusCode)
 	}
 	var status struct {
 		CreatedAt time.Time `json:"createdAt"`
 	}
 	if err := json.NewDecoder(gresp.Body).Decode(&status); err != nil {
-		return time.Time{}, fmt.Errorf("differential: decode status: %w", err)
+		return time.Time{}, "", fmt.Errorf("differential: decode status: %w", err)
 	}
-	return status.CreatedAt, nil
+	return status.CreatedAt, id, nil
 }
