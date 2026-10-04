@@ -156,3 +156,19 @@ func TestPairNonTiedOrderDiverges(t *testing.T) {
 		t.Fatalf("expected dispatch-order mismatch, got %v", mm)
 	}
 }
+
+// TestPartialRunDoesNotGate proves the vacuous-gate fix: 21 tasks against
+// a 1000-window carry no full window, so even exact shares must NOT read
+// as a passed gate. A comparator that reports "pass" here approves any
+// distribution, including one contradicting the workload weights.
+func TestPartialRunDoesNotGate(t *testing.T) {
+	weights := map[string]float64{"a": 1, "b": 2, "c": 7}
+	log := synthLog(weights, []string{"a", "b", "c"}, []int{3, 6, 12})
+	results, mm := CompareShares(log, 1000, 2)
+	if mm != nil {
+		t.Fatalf("partial run should not fail, it should not gate: %v", mm)
+	}
+	if FullWindows(results) != 0 {
+		t.Fatalf("FullWindows = %d, want 0 for a 21-task run in 1000-windows", FullWindows(results))
+	}
+}

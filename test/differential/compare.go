@@ -32,7 +32,11 @@ type WindowResult struct {
 	Shares     map[string]int
 	Expected   map[string]float64
 	Deviations map[string]float64
-	Pass       bool
+	// Full marks complete windows. The partial tail window is reported,
+	// never gated — and a run with zero full windows cannot gate fairness
+	// at all (see FullWindows): shares are recorded, not claimed.
+	Full bool
+	Pass bool
 }
 
 // Mismatch is the classification block (§7): which dimension diverged,
@@ -85,7 +89,7 @@ func CompareShares(log RunLog, windowSize int, tolerance float64) ([]WindowResul
 		wr := WindowResult{
 			Window: start / windowSize, Shares: counts,
 			Expected: map[string]float64{}, Deviations: map[string]float64{},
-			Pass: true,
+			Full: full, Pass: true,
 		}
 		n := float64(end - start)
 		for tenant, w := range log.Weights {
@@ -117,14 +121,29 @@ func CompareShares(log RunLog, windowSize int, tolerance float64) ([]WindowResul
 	return out, nil
 }
 
-// TieGroups clusters records that tie on (priority, createdAt) — ordering
-// inside a group is explicitly non-gated (§2 match criterion); the
-// clusters are diagnostic output, not verdicts.
+// FullWindows counts complete (gated) windows. Zero means the run had
+// insufficient volume for the windowed gate — shares must be recorded,
+// never claimed as passing. A silent pass on a partial-only run is the
+// vacuous-gate bug: the comparator would approve any distribution,
+// including one that contradicts the workload weights.
+func FullWindows(results []WindowResult) int {
+	n := 0
+	for _, w := range results {
+		if w.Full {
+			n++
+		}
+	}
+	return n
+}
+
 type TieKey struct {
 	Priority  int64
 	CreatedAt int64
 }
 
+// TieGroups clusters records that tie on (priority, createdAt) — ordering
+// inside a group is explicitly non-gated (§2 match criterion); the
+// clusters are diagnostic output, not verdicts.
 func TieGroups(order []DispatchRecord, createdAt map[string]int64) [][]DispatchRecord {
 	groups := map[TieKey][]DispatchRecord{}
 	var keys []TieKey

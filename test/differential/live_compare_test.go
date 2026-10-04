@@ -127,11 +127,19 @@ func TestLiveJavaVsGo(t *testing.T) {
 	// Ordering is evidence only (see ORDER DIAGNOSTIC below): the Go-vs-Go
 	// control proved exact-order parity flaky-by-construction, so no
 	// ordering verdict gates a live run.
-	if _, mm := CompareShares(java.Log, 1000, 2); mm != nil {
-		t.Fatalf("java shares diverged: %v", mm)
-	}
-	if _, mm := CompareShares(goRes.Log, 1000, 2); mm != nil {
-		t.Fatalf("go shares diverged: %v", mm)
+	// Shares gate the full run ONLY when at least one complete window
+	// exists. Below one window of volume the gate is vacuous (a partial
+	// tail never fails) — shares are recorded, never claimed. Smoke runs
+	// (21 tasks vs 1000-window) exercise the pipeline, not the bound.
+	for side, log := range map[string]RunLog{"java": java.Log, "go": goRes.Log} {
+		results, mm := CompareShares(log, 1000, 2)
+		if FullWindows(results) == 0 {
+			t.Logf("%s shares recorded (no full window — gate not applied): %s", side, summarize(log))
+			continue
+		}
+		if mm != nil {
+			t.Fatalf("%s shares diverged: %v", side, mm)
+		}
 	}
 	steady := func(r SideResult) RunLog {
 		o := r.Log.Order[min(r.Warmup, len(r.Log.Order)):]
