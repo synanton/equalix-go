@@ -364,8 +364,10 @@ func TestStarvedAndTimedOut(t *testing.T) {
 	}
 	// Make it in-flight long ago, then find via timeout scan.
 	// The updated_at trigger would override a plain backdate UPDATE, so
-	// the trigger is disabled for this statement only (testcontainers runs
-	// as superuser; production code never disables triggers).
+	// the trigger is disabled for this statement only. Privilege needed is
+	// table ownership (DISABLE TRIGGER is an owner-level operation, not
+	// superuser) — satisfied by default in testcontainers; production code
+	// never disables triggers.
 	old.Status = domain.StatusDispatched
 	if err := tasks.Save(ctx, old); err != nil {
 		t.Fatal(err)
