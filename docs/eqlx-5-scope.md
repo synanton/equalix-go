@@ -79,6 +79,10 @@ semantics. Row 10 is completion-gated (both finish) with reported timing.
   run would ingest hour-old tasks, and the timeout dimension would measure
   different things on each side (immediate timeouts vs none). The harness
   materializes absolute timestamps at ingest as `run_start + offset`.
+  Offsets must be ≥ 0 — a negative offset (task arriving before the
+  run-start marker) rejects the file at load, loudly. Synthesizing a
+  pre-marker ingest would invent timeline both schedulers then share
+  unknowingly; rejection keeps the file total and honest.
 - **Run-start marker (pinned):** the first ingest call accepted by the
   service under test. Both timelines align on their own first ingest, so
   JVM warmup duration never leaks into Go's timeline or vice versa.
