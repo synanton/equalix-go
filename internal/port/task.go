@@ -30,6 +30,9 @@ type TaskRepository interface {
 	// FindAndLockDispatchable locks up to limit QUEUED non-sequential
 	// tasks under quota, ordered by (priority, createdAt, id).
 	// maxPerClient <= 0 disables the per-key ceiling (spec §5.1).
+	// Selection carries no time predicate — no caller clock involved,
+	// consistent with the DB-time `now() - interval` predicates in
+	// FindStarved/FindTimedOut (no clock-skew class across instances).
 	FindAndLockDispatchable(ctx context.Context, limit, maxPerClient int) ([]*domain.Task, error)
 	// FindStarved returns QUEUED non-sequential tasks older than
 	// olderThan, oldest first (promotion scan, spec §5.1). Parity note:
