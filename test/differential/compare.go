@@ -125,7 +125,7 @@ func CompareShares(log RunLog, windowSize int, tolerance float64) ([]WindowResul
 // insufficient volume for the windowed gate — shares must be recorded,
 // never claimed as passing. A silent pass on a partial-only run is the
 // vacuous-gate bug: the comparator would approve any distribution,
-// including one that contradicts the workload weights.
+// including one contradicting the workload weights.
 func FullWindows(results []WindowResult) int {
 	n := 0
 	for _, w := range results {
@@ -134,6 +134,22 @@ func FullWindows(results []WindowResult) int {
 		}
 	}
 	return n
+}
+
+// RequireGate fails the calling test unless at least min full windows
+// exist. Calibration fixtures call this before asserting their expected
+// outcome: a fixture whose "expected failure" derives from windowed
+// behavior must run at scale ≥ min full windows, or a vacuous gate would
+// let it pass without exercising anything. Self-checking calibration —
+// fixtures cannot be configured into vacuity.
+func RequireGate(t interface {
+	Helper()
+	Fatalf(string, ...any)
+}, results []WindowResult, min int) {
+	t.Helper()
+	if got := FullWindows(results); got < min {
+		t.Fatalf("only %d full windows, need ≥ %d for the gate to fire — fixture volume too small", got, min)
+	}
 }
 
 type TieKey struct {

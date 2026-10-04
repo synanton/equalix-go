@@ -1,0 +1,29 @@
+# Differential-test environment (EQLX-5). Reproducible from committed
+# artifacts only: image, databases, credentials. No /tmp paths, no scratch
+# container names, no manual psql. `docker compose -f test/differential/docker-compose.yml up -d`
+# then EQUALIX_LIVE_COMPARE=1 with the DSNs below.
+name: equalix-differential
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: x
+      POSTGRES_DB: equalix
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  # Databases are created (not assumed) by the harness setup step:
+  #   CREATE USER cmp WITH PASSWORD 'x' SUPERUSER;
+  #   CREATE DATABASE equalix_java OWNER cmp;
+  #   CREATE DATABASE equalix_go OWNER cmp;
+  # Go migrations apply from migrations/*.sql; Java Flyway migrates on boot.
+  # DSNs for a default local run:
+  #   Java JDBC: jdbc:postgresql://localhost:5433/equalix_java
+  #   Go DSN:    postgres://cmp:x@localhost:5433/equalix_go?sslmode=disable

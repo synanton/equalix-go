@@ -58,7 +58,8 @@ func TestFalsificationFirstQueued(t *testing.T) {
 	weights := map[string]float64{"a": 1, "b": 2, "c": 7}
 	// First-queued ignores weights: equal counts per tenant.
 	bad := synthLog(weights, []string{"a", "b", "c"}, []int{334, 333, 333})
-	_, mm := CompareShares(bad, 1000, 2)
+	results, mm := CompareShares(bad, 1000, 2)
+	RequireGate(t, results, 1)
 	if mm == nil {
 		t.Fatal("comparator reported parity for a known-bad dispatcher — instrument broken")
 	}
@@ -77,7 +78,8 @@ func TestFalsificationInvertedWeights(t *testing.T) {
 	// workload file rather than the code.
 	weights := map[string]float64{"a": 1, "b": 2, "c": 7}
 	bad := synthLog(weights, []string{"a", "b", "c"}, []int{700, 200, 100})
-	_, mm := CompareShares(bad, 1000, 2)
+	results, mm := CompareShares(bad, 1000, 2)
+	RequireGate(t, results, 1)
 	if mm == nil {
 		t.Fatal("inverted weights reported as parity — comparator not reading inputs")
 	}
