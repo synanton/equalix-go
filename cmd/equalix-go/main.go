@@ -90,6 +90,7 @@ func (m *memMetrics) RecordCompletion(t, r string, _ int64) {
 func (m *memMetrics) ObserveDispatchLatency(_ float64) {}
 func (m *memMetrics) SetRPS(r float64)                 { m.mu.Lock(); m.rps = r; m.mu.Unlock() }
 func (m *memMetrics) PublishDrift(_ map[string]int64)  {}
+func (m *memMetrics) SetQueueDepth(_ int)              {}
 
 // TODO(EQLX-4): placeholder — reports a fixed 1.0, not a measured rate.
 // Wire to the adaptive controller when it lands; until then GET /status
@@ -97,6 +98,14 @@ func (m *memMetrics) PublishDrift(_ map[string]int64)  {}
 type fixedRPS struct{ rps float64 }
 
 func (f fixedRPS) CurrentRPS() float64 { return f.rps }
+
+func toInt64(m map[string]int) map[string]int64 {
+	out := make(map[string]int64, len(m))
+	for k, v := range m {
+		out[k] = int64(v)
+	}
+	return out
+}
 
 func run() error {
 	var (
@@ -135,9 +144,10 @@ func run() error {
 	defer locker.Close()
 
 	metrics := &memMetrics{dispatches: map[string]int{}, completions: map[string]int{}}
+	cmsketch := &localCMS{s: cms.New(65536, 5)}
 	handler := chiadapter.NewRouter(chiadapter.Deps{
 		Tasks: stores.Tasks, Counts: stores.Counts, Sequences: stores.Sequences,
-		CMS: &localCMS{s: cms.New(65536, 5)}, Metrics: metrics,
+		CMS: cmsketch, Metrics: metrics,
 		RPS: fixedRPS{rps: 1}, Clock: domain.SystemClock{},
 		APIKey: *apiKey, MaxPayloadBytes: *maxPayload,
 	})
@@ -174,9 +184,34 @@ func run() error {
 		}
 	}
 
+	// CMS warm-up (Java parity: CmsWarmUpListener): rebuild the sketch
+	// from in-flight rows WITHOUT publishing drift — an empty sketch at
+	// startup would otherwise read as underestimate for every key.
+	if actual, err := stores.Tasks.CountInFlight(ctx); err != nil {
+		return fmt.Errorf("warm-up snapshot: %w", err)
+	} else if err := cmsketch.Rebuild(ctx, toInt64(actual)); err != nil {
+		return fmt.Errorf("warm-up rebuild: %w", err)
+	} else {
+		slog.Info("cms warmed up", "keys", len(actual))
+	}
+
+	// TODO(executor): wire the dispatcher once a port.Executor adapter
+	// exists. Until then dispatch runs only in tests (TickForTest).
 	runner := jobs.NewRunner(slog.Default(), nil,
-		jobs.NewNoopJob("watchdog", cfg.WatchdogInterval),
-		jobs.NewNoopJob("timeout", cfg.TimeoutSweepInterval),
+		jobs.NewCalculator(jobs.CalculatorDeps{
+			Tasks: stores.Tasks, Sequences: stores.Sequences,
+			VT: stores.VirtualTime, CMS: cmsketch,
+			Metrics: metrics, Config: cfg,
+		}),
+		jobs.NewWatchdog(jobs.WatchdogDeps{
+			Tasks: stores.Tasks, Counts: stores.Counts, CMS: cmsketch,
+			Metrics: metrics, Config: cfg,
+		}),
+		jobs.NewTimeout(jobs.TimeoutDeps{
+			Tx: stores, Tasks: stores.Tasks, Counts: stores.Counts,
+			Sequences: stores.Sequences, CMS: cmsketch,
+			Config: cfg, Clock: domain.SystemClock{},
+		}),
 	)
 
 	server := &http.Server{Addr: *addr, Handler: handler}

@@ -93,6 +93,18 @@ func (f *fakeTasks) ListByKey(_ context.Context, key string, status *domain.Stat
 	return out, nil
 }
 
+func (f *fakeTasks) CountReceived(_ context.Context) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, t := range f.tasks {
+		if t.Status == domain.StatusReceived {
+			n++
+		}
+	}
+	return n, nil
+}
+
 type fakeCounts struct {
 	mu sync.Mutex
 	m  map[string]int
@@ -219,6 +231,7 @@ func (f *fakeMetrics) RecordCompletion(t, r string, d int64) {
 func (f *fakeMetrics) ObserveDispatchLatency(_ float64) {}
 func (f *fakeMetrics) SetRPS(r float64)                 { f.rps = r }
 func (f *fakeMetrics) PublishDrift(_ map[string]int64)  {}
+func (f *fakeMetrics) SetQueueDepth(_ int)              {}
 
 type fakeRPS struct{ rps float64 }
 

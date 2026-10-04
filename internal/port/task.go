@@ -44,6 +44,10 @@ type TaskRepository interface {
 	// (watchdog snapshot input, spec §8). Full GROUP BY scan like Java;
 	// no paging (see CountsRepository.All note on cardinality).
 	CountInFlight(ctx context.Context) (map[string]int, error)
+	// CountReceived returns the RECEIVED backlog size (calculator-overflow
+	// gauge input, 3b scope §3). Sampled only on saturated calculator
+	// ticks; served by idx_tasks_status_created_at, never on the hot path.
+	CountReceived(ctx context.Context) (int, error)
 	// FindNextSequential returns the QUEUED sequential task for key at
 	// sequence number seq, or (nil, nil) when absent.
 	FindNextSequential(ctx context.Context, key string, seq int64) (*domain.Task, error)

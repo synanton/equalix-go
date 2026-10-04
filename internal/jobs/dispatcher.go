@@ -34,6 +34,9 @@ func NewDispatcher(d DispatcherDeps) *Dispatcher {
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
+	if d.Metrics == nil {
+		d.Metrics = discardMetrics{}
+	}
 	return &Dispatcher{deps: d}
 }
 

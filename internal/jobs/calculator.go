@@ -16,6 +16,7 @@ type CalculatorDeps struct {
 	Sequences port.SequenceStateRepository
 	VT        port.VirtualTimeRepository
 	CMS       port.CMSStore
+	Metrics   port.Metrics
 	Config    Config
 	Log       *slog.Logger
 }
@@ -23,12 +24,18 @@ type CalculatorDeps struct {
 // Calculator tags RECEIVED tasks QUEUED with virtual-time priorities.
 type Calculator struct {
 	deps CalculatorDeps
+	// saturatedStreak counts consecutive cap-full batches (overflow
+	// signal, 3b scope §3). Reset by any non-full batch.
+	saturatedStreak int
 }
 
 // NewCalculator builds a Calculator. Config must Validate.
 func NewCalculator(d CalculatorDeps) *Calculator {
 	if d.Log == nil {
 		d.Log = slog.Default()
+	}
+	if d.Metrics == nil {
+		d.Metrics = discardMetrics{}
 	}
 	return &Calculator{deps: d}
 }
@@ -67,6 +74,24 @@ func (c *Calculator) tick(ctx context.Context) error {
 	received, err := c.deps.Tasks.FindReceived(ctx, cfg.WorkerPollSize)
 	if err != nil {
 		return err
+	}
+	// Saturation (pinned definition): batch returned at exactly cap.
+	// Consecutive saturated ticks (streak, matching the Loop pattern)
+	// sample the gauge and warn at 5 — ingestion outrunning the tick is
+	// otherwise silent. No ingestion-side block (scope §3 hybrid).
+	if len(received) == cfg.WorkerPollSize {
+		c.saturatedStreak++
+		if depth, err := c.deps.Tasks.CountReceived(ctx); err != nil {
+			return err
+		} else {
+			c.deps.Metrics.SetQueueDepth(depth)
+		}
+		if c.saturatedStreak >= 5 {
+			c.deps.Log.Warn("calculator saturated, backlog growing",
+				"streak", c.saturatedStreak, "batch", cfg.WorkerPollSize)
+		}
+	} else {
+		c.saturatedStreak = 0
 	}
 	for _, t := range received {
 		if err := c.tagOne(ctx, t); err != nil {
