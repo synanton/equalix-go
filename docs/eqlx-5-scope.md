@@ -60,13 +60,22 @@ semantics. Row 10 is completion-gated (both finish) with reported timing.
 
 - **Workload file (JSONL, checked in under `test/differential/workloads/`):**
   one record per task with **deterministic `id` (UUIDv5 from
-  `tenant:seq`), `tenant`, `weight`, `created_at` (explicit ISO-8601),
-  `payload_bytes`**. Rationale: the tie-break comparator is
+  `tenant:seq`), `tenant`, `weight`, `created_at_offset_ms` (relative to
+  run start — never absolute timestamps), `payload_bytes`**. Rationale:
+  the tie-break comparator is
   `priority ASC, created_at ASC, id ASC`. UUID-generated-at-ingest IDs
   would differ between runs, and every tie group would false-mismatch —
   not a scheduler bug on either side, a harness design flaw. The file
   specifies everything the server would otherwise generate, so both runs
   consume byte-identical inputs.
+- **Offsets, not absolutes (pinned):** absolute `created_at` values couple
+  the workload to wall-clock — a Go run starting an hour after the Java
+  run would ingest hour-old tasks, and the timeout dimension would measure
+  different things on each side (immediate timeouts vs none). The harness
+  materializes absolute timestamps at ingest as `run_start + offset`.
+- **Run-start marker (pinned):** the first ingest call accepted by the
+  service under test. Both timelines align on their own first ingest, so
+  JVM warmup duration never leaks into Go's timeline or vice versa.
 - **Match criterion (pinned): aggregate fairness is the acceptance
   criterion; task-level ordering is diagnostic.** Within a tie group
   (equal priority *and* equal created_at), order may differ without
@@ -127,9 +136,14 @@ semantics. Row 10 is completion-gated (both finish) with reported timing.
   more than K consecutive dispatch windows (same 1000-dispatch windows as
   §4) with zero dispatches, K=3.** Rationale: shares could technically
   hold while one tenant starves for a full window and gorges the next;
-  the K-window rule forbids exactly that shape. If Java later states its
-  own bound, the tighter of the two governs and this section is amended
-  with the Java citation.
+  the K-window rule forbids exactly that shape.
+- **Tighter-wins, stated explicitly:** the scope's definition is the
+  acceptance criterion for both sides. If the harness discovers Java
+  tolerating K=5 on some workload while the scope says K=3, that is
+  reported as **a finding about Java**, not a Go failure and not a reason
+  to loosen the bound. Go passing K=3 proves Go meets the stated claim;
+  Java failing it is information about the oracle. The comparator never
+  relaxes the bound to match observed behavior on either side.
 
 ### 6. Falsification test (harness's first passing test)
 
@@ -139,19 +153,48 @@ semantics. Row 10 is completion-gated (both finish) with reported timing.
   beyond the §4 bound in multiple windows, non-zero exit. If the harness
   reports parity here, the comparator is broken and no other result from
   it is admissible.
+- **Timeout detection granularity floor (pinned):** detection latency is
+  bounded below by the sweep cadence on each side (Go: dispatcher-interval
+  per CORRECTION-2; Java: its scheduler cadence). Deltas smaller than
+  `max(sweep intervals)` measure the sweep clocks, not the timeout
+  mechanism — only larger deltas are meaningful comparisons. The harness
+  reports raw detection latencies and gates only on
+  `|go − java| > max_interval_floor`.
 - Second calibration (cheap, high value): inverted weights (7:2:1 file
   against a 1:2:7 expectation) must fail in the opposite direction,
   proving the comparator reads the file rather than the code.
+- **Calibration family (pinned): falsification is one point, not the
+  whole curve.** `FirstQueuedDispatcher` catches mis-weighted aggregates;
+  two more fixtures cover the adjacent failure classes, each a small
+  decorator in the same shape:
+  - `StarvingDispatcher` — weights applied, aging disabled, sustained
+    backlog. Correct shares in short windows; violates the K=3 starvation
+    rule for the lowest-weight tenant over long ones. Confirms the
+    starvation gate fires (and only it — shares must still pass).
+  - `QuotaIgnoringDispatcher` — weights applied, `maxPerClient` ignored:
+    a single-tenant burst dispatches disproportionately. Correct averages
+    over long windows, wrong inside the burst. Confirms the fairness gate
+    is window-sensitive (fails short windows, passes long ones).
 
 ### 7. Output format — methodology, not target numbers
 
 - Every result publishes as a directory: `methodology.md` (scope version
   hash + workload file hash + stub parameters + mode + window definition),
-  `results.json` (per-dimension numbers + bounds + pass/fail), and the raw
+  `results.json` (per-dimension numbers + bounds + pass/fail), the Java
+  commit SHA and Go commit SHA the result was measured against, and the raw
   dispatch logs for both sides. A result without its configuration is not
   publishable — re-running the same workload file with different stub
   parameters is a different experiment, and the format makes that
-  unrepresentable as the same result.
+  unrepresentable as the same result. The two SHAs attribute every result
+  to specific builds: a result at T2 is distinguishable from T1 without
+  re-running.
+- Differential runs stay behind the `differential` build tag, out of
+  default per-push CI (oracle checkout + two databases + minutes-to-hours
+  runtime is not a per-push gate). **Intent, stated so the harness cannot
+  rot:** a separate scheduled workflow (nightly or manual dispatch)
+  runs differential against a pinned Java commit. Scope states the intent;
+  the workflow file lands with the harness. "We have differential testing"
+  must always name a cadence, never just a build tag.
 - The scope doc this file lives in states the principle explicitly:
   **EQLX-5 defines how equivalence is demonstrated; it does not set
   performance targets.** Go may be faster, slower, or equal per dimension;
