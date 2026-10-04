@@ -9,9 +9,19 @@ import (
 	"github.com/synanton/equalix-go/internal/port"
 )
 
+// Throttle is the adaptive controller surface the jobs need: current cap
+// for the dispatch budget and penalty factor for priority pressure.
+// *adaptive.Controller implements it; fakes stub two methods. Deliberately
+// narrow — the jobs never touch EMA state, windows, or dampener internals.
+type Throttle interface {
+	CurrentRPS() float64
+	PenaltyFactor() float64
+}
+
 // DispatcherDeps wires one Dispatcher tick. Tx binds Tasks+Counts+VirtualTime
 // to one connection (DECISION-3); CMS and Executor act post-commit; Metrics
 // records dispatches. Pool bounds async sends (claim-limited, scope §2).
+// Throttle nil preserves the fixed pre-EQLX-4 behavior (tests, early wiring).
 type DispatcherDeps struct {
 	Tx       port.Transactor
 	Tasks    port.TaskRepository
@@ -20,6 +30,7 @@ type DispatcherDeps struct {
 	Executor port.Executor
 	Metrics  port.Metrics
 	Pool     *SendPool
+	Throttle Throttle
 	Config   Config
 	Log      *slog.Logger
 }
@@ -87,6 +98,12 @@ func (d *Dispatcher) tick(ctx context.Context) error {
 		return err
 	}
 	free := domain.FreeSlots(cfg.MaxTasksInProcess, inFlight, false, 0, 0)
+	if d.deps.Throttle != nil {
+		// Adaptive budget (spec §5.1): per-tick cap from the live RPS.
+		free = domain.FreeSlots(cfg.MaxTasksInProcess, inFlight, true,
+			d.deps.Throttle.CurrentRPS(), cfg.DispatcherInterval.Seconds())
+		d.deps.Metrics.SetRPS(d.deps.Throttle.CurrentRPS())
+	}
 	if claim := d.deps.Pool.Free(); claim < free {
 		free = claim
 	}

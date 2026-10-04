@@ -9,14 +9,15 @@ import (
 )
 
 // CalculatorDeps wires one Calculator tick: batch RECEIVED → tag → priority
-// → QUEUED, plus per-tick starvation promotion. PenaltyFactor is the fixed
-// pre-EQLX-4 pressure (config key, default 1000.0).
+// → QUEUED, plus per-tick starvation promotion. Throttle nil falls back to
+// the fixed cfg.PenaltyFactor (pre-EQLX-4 behavior, tests).
 type CalculatorDeps struct {
 	Tasks     port.TaskRepository
 	Sequences port.SequenceStateRepository
 	VT        port.VirtualTimeRepository
 	CMS       port.CMSStore
 	Metrics   port.Metrics
+	Throttle  Throttle
 	Config    Config
 	Log       *slog.Logger
 }
@@ -112,8 +113,12 @@ func (c *Calculator) tagOne(ctx context.Context, t *domain.Task) error {
 	if err != nil {
 		return err
 	}
+	penalty := cfg.PenaltyFactor
+	if c.deps.Throttle != nil {
+		penalty = c.deps.Throttle.PenaltyFactor()
+	}
 	t.VirtualFinish = tag
-	t.Priority = domain.CalculatePriority(tag, inFlight, cfg.PenaltyFactor, t.EffectiveWeight())
+	t.Priority = domain.CalculatePriority(tag, inFlight, penalty, t.EffectiveWeight())
 	t.HasPriority = true
 	if t.Sequential {
 		st, err := c.deps.Sequences.FindOrCreate(ctx, t.FairnessKey)

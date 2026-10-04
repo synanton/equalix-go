@@ -258,6 +258,11 @@ func (h *Handler) releaseSlot(r *http.Request, task *domain.Task, success bool, 
 		result = "success"
 	}
 	h.deps.Metrics.RecordCompletion(task.FairnessKey, result, durationMs)
+	// Controller sample: same durationMs the metrics path uses — the §4
+	// UpdatedAt-derived latency, not a fresh stamp.
+	if h.deps.Throttle != nil {
+		h.deps.Throttle.RecordCompletion(durationMs, success)
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
