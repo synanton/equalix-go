@@ -31,8 +31,11 @@ func TestMarkerFromFirstIngestResponse(t *testing.T) {
 	defer srv.Close()
 
 	before := time.Now()
+	// submittedAt in the past: no scheduling wait. The marker must still
+	// equal the server stamp, proving it comes from the ingest response
+	// rather than any client-side clock reading.
 	marker, err := SubmitTask(context.Background(), srv.Client(), srv.URL, "key",
-		Task{ID: "t", Tenant: "a", Weight: 1, PayloadBytes: 4}, before.Add(time.Hour))
+		Task{ID: "t", Tenant: "a", Weight: 1, PayloadBytes: 4}, before.Add(-time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
