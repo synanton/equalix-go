@@ -142,7 +142,8 @@ func TestLiveRunAgainstFakes(t *testing.T) {
 	}
 	fake.setStub("http://" + stubAddr)
 
-	svc := SideConfig{Name: "fake", BaseURL: srv.URL, DSN: "postgres://fake", HTTPPort: 1, APIKey: "k"}
+	// Empty DSN: no SQL visibility in fakes, quiescence wait skipped.
+	svc := SideConfig{Name: "fake", BaseURL: srv.URL, DSN: "", HTTPPort: 1, APIKey: "k"}
 	workload := []Task{
 		{ID: "t-a-0", Tenant: "a", Weight: 1, CreatedAtOffsetMs: 0, SubmittedAtOffsetMs: 0, PayloadBytes: 4},
 		{ID: "t-b-0", Tenant: "b", Weight: 2, CreatedAtOffsetMs: 0, SubmittedAtOffsetMs: 0, PayloadBytes: 4},
