@@ -23,14 +23,20 @@ else provides.
   tasks table across two schedulers). The stub executor is a shared
   *protocol* both schedulers speak (dispatch receive → webhook complete);
   scheduler-side code never knows it is a fixture.
-- **Falsification first:** the harness's first passing test runs a
-  known-bad dispatcher and must report mismatch. The fixture:
-  `FirstQueuedDispatcher` — a `port.TaskRepository` decorator (or config
-  flag on the test binary) that ignores weights and priority entirely and
-  returns the oldest `QUEUED` row per tick. Against a 1:2:7 workload it
-  yields ~1:1:1 shares; the harness must report deviation beyond the §4
-  bound and exit non-zero. A measuring instrument never calibrated against
-  a known-bad case is an assertion, not an instrument.
+- **Falsification first — and on every run, not once:** the harness's
+  first passing test runs a known-bad dispatcher and must report mismatch.
+  The fixture: `FirstQueuedDispatcher` — a `port.TaskRepository` decorator
+  (or config flag on the test binary) that ignores weights and priority
+  entirely and returns the oldest `QUEUED` row per tick. Against a 1:2:7
+  workload it yields ~1:1:1 shares; the harness must report deviation
+  beyond the §4 bound and exit non-zero. A measuring instrument never
+  calibrated against a known-bad case is an assertion, not an instrument.
+  **Calibration is pre-flight, not history:** every comparison run opens
+  by replaying the calibration fixtures against both sides and confirming
+  the expected mismatches, then resets and runs the real workload. A
+  comparator regression that silently passes everything (e.g. a filter
+  swallowing non-matching tasks) would otherwise go undetected
+  indefinitely — the fixtures gate every run, not just the first.
 - Until §0 ships, every other section is specification, not procedure.
 
 ### 1. Dimension table (13 rows; mode per row, not per run)
@@ -180,14 +186,20 @@ semantics. Row 10 is completion-gated (both finish) with reported timing.
 
 - Every result publishes as a directory: `methodology.md` (scope version
   hash + workload file hash + stub parameters + mode + window definition),
-  `results.json` (per-dimension numbers + bounds + pass/fail), the Java
+  `results.json` (per-dimension numbers + bounds + pass/fail **plus, on
+  any mismatch, a classification block:** which dimension diverged, which
+  gate the run was exercising vs which gate actually fired, the specific
+  tasks/windows of divergence, and both sides' evidence — raw logs,
+  dispatch sequence, window breakdown — side by side), the Java
   commit SHA and Go commit SHA the result was measured against, and the raw
   dispatch logs for both sides. A result without its configuration is not
   publishable — re-running the same workload file with different stub
   parameters is a different experiment, and the format makes that
   unrepresentable as the same result. The two SHAs attribute every result
   to specific builds: a result at T2 is distinguishable from T1 without
-  re-running.
+  re-running. The classification block exists so the first real mismatch
+  points at the failed boundary instead of producing "they disagree
+  somewhere" and a debugging session from zero.
 - Differential runs stay behind the `differential` build tag, out of
   default per-push CI (oracle checkout + two databases + minutes-to-hours
   runtime is not a per-push gate). **Intent, stated so the harness cannot
