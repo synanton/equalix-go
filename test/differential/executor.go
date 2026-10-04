@@ -61,6 +61,10 @@ func DefaultLatency() LatencyConfig {
 }
 
 // Sampler draws completion latencies deterministically from the config.
+// Determinism is cross-platform by construction: math/rand (v1) with an
+// explicit Seed — never the global rand, never time-seeded, never
+// math/rand/v2 (whose algorithm versioning differs). A sampler that
+// diverged by platform would read as scheduler divergence.
 type Sampler struct {
 	cfg LatencyConfig
 	rng *rand.Rand

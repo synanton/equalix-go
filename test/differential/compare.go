@@ -21,6 +21,9 @@ type RunLog struct {
 	Weights map[string]float64
 	// Order is the dispatch sequence, position 0 first.
 	Order []DispatchRecord
+	// Created maps task ID → created_at so tie groups are computable
+	// without re-reading the workload file.
+	Created map[string]int64
 }
 
 // WindowResult is one §4 window's verdict.
@@ -33,12 +36,24 @@ type WindowResult struct {
 }
 
 // Mismatch is the classification block (§7): which dimension diverged,
-// which windows, and both sides' numbers. Returned (not logged) so the
-// harness exit status derives from it: any Mismatch → non-zero exit.
+// which gate the run was exercising vs which gate actually fired, the
+// specific tasks/windows of divergence, and both sides' evidence. Returned
+// (not logged) so the harness exit status derives from it: any Mismatch →
+// non-zero exit. Structured (never a bare bool) so classification can be
+// built on top — a bool return could not carry this block.
 type Mismatch struct {
 	Dimension string
-	Windows   []WindowResult
-	Detail    string
+	// GateExercised names the gate the run intended to test
+	// (e.g. "fairness-shares"); GateFired names the gate that actually
+	// tripped. Equal in real runs; divergent in calibration analysis.
+	GateExercised string
+	GateFired     string
+	Windows       []WindowResult
+	// JavaEvidence and GoEvidence carry per-side summaries (dispatch
+	// counts, window breakdowns); full raw logs attach in results.json.
+	JavaEvidence string
+	GoEvidence   string
+	Detail       string
 }
 
 func (m *Mismatch) Error() string {
@@ -92,9 +107,11 @@ func CompareShares(log RunLog, windowSize int, tolerance float64) ([]WindowResul
 	}
 	if len(bad) > 0 {
 		return out, &Mismatch{
-			Dimension: "fairness-shares",
-			Windows:   bad,
-			Detail:    fmt.Sprintf("first bad window %d: %v", bad[0].Window, bad[0].Deviations),
+			Dimension:     "fairness-shares",
+			GateExercised: "fairness-shares",
+			GateFired:     "fairness-shares",
+			Windows:       bad,
+			Detail:        fmt.Sprintf("first bad window %d: %v", bad[0].Window, bad[0].Deviations),
 		}
 	}
 	return out, nil
@@ -131,4 +148,66 @@ func TieGroups(order []DispatchRecord, createdAt map[string]int64) [][]DispatchR
 		}
 	}
 	return out
+}
+
+// ComparePair compares two sides' logs for one workload (§§4, 7 match
+// criterion): aggregate shares gate per side, and exact dispatch positions
+// gate outside tie groups (inside a tie group, order is diagnostic only).
+// Returns nil on full parity. Either side failing shares, or any
+// non-tied position differing, yields a classified Mismatch.
+func ComparePair(java, goLog RunLog, windowSize int, tolerance float64, gate string) *Mismatch {
+	if _, mm := CompareShares(java, windowSize, tolerance); mm != nil {
+		mm.GateExercised = gate
+		mm.JavaEvidence = summarize(java)
+		mm.GoEvidence = summarize(goLog)
+		return mm
+	}
+	if _, mm := CompareShares(goLog, windowSize, tolerance); mm != nil {
+		mm.GateExercised = gate
+		mm.JavaEvidence = summarize(java)
+		mm.GoEvidence = summarize(goLog)
+		return mm
+	}
+	if diff := orderDivergence(java, goLog); diff != "" {
+		return &Mismatch{
+			Dimension: "dispatch-order", GateExercised: gate, GateFired: "dispatch-order",
+			JavaEvidence: summarize(java), GoEvidence: summarize(goLog), Detail: diff,
+		}
+	}
+	return nil
+}
+
+// orderDivergence reports position mismatches outside tie groups ("" when
+// the orders agree up to tie-group permutation). Different lengths diverge
+// unconditionally — a missing dispatch is never a tie artifact.
+func orderDivergence(java, goLog RunLog) string {
+	if len(java.Order) != len(goLog.Order) {
+		return fmt.Sprintf("lengths differ: java=%d go=%d", len(java.Order), len(goLog.Order))
+	}
+	tied := map[string]bool{}
+	for _, g := range TieGroups(java.Order, java.Created) {
+		for _, r := range g {
+			tied[r.TaskID] = true
+		}
+	}
+	for _, g := range TieGroups(goLog.Order, goLog.Created) {
+		for _, r := range g {
+			tied[r.TaskID] = true
+		}
+	}
+	for i := range java.Order {
+		a, b := java.Order[i].TaskID, goLog.Order[i].TaskID
+		if a != b && !tied[a] && !tied[b] {
+			return fmt.Sprintf("position %d: java=%s go=%s (non-tied)", i, a, b)
+		}
+	}
+	return ""
+}
+
+func summarize(log RunLog) string {
+	counts := map[string]int{}
+	for _, r := range log.Order {
+		counts[r.Tenant]++
+	}
+	return fmt.Sprintf("dispatches=%d shares=%v", len(log.Order), counts)
 }

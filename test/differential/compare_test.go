@@ -10,6 +10,7 @@ import (
 // synthLog builds a dispatch log with exact per-tenant counts in order.
 func synthLog(weights map[string]float64, tenants []string, counts []int) RunLog {
 	var order []DispatchRecord
+	created := map[string]int64{}
 	seq := 0
 	max := 0
 	for _, c := range counts {
@@ -21,14 +22,16 @@ func synthLog(weights map[string]float64, tenants []string, counts []int) RunLog
 	for i := 0; i < max; i++ {
 		for ti, tenant := range tenants {
 			if i < counts[ti] {
+				id := fmt.Sprintf("%s-%d", tenant, i)
 				order = append(order, DispatchRecord{
-					Seq: seq, TaskID: fmt.Sprintf("%s-%d", tenant, i), Tenant: tenant,
+					Seq: seq, TaskID: id, Tenant: tenant,
 				})
+				created[id] = int64(seq)
 				seq++
 			}
 		}
 	}
-	return RunLog{Weights: weights, Order: order}
+	return RunLog{Weights: weights, Order: order, Created: created}
 }
 
 func TestCompareSharesPass(t *testing.T) {
@@ -90,5 +93,66 @@ func TestTieGroupsDiagnostic(t *testing.T) {
 	groups := TieGroups(order, created)
 	if len(groups) != 1 || len(groups[0]) != 2 {
 		t.Fatalf("groups = %+v, want one 2-record tie group", groups)
+	}
+}
+
+// TestHappyPathIdenticalLogs is the equality direction the falsification
+// fixtures don't cover: a comparator that always reports divergence would
+// pass every calibration test above. Identical canonical inputs must yield
+// zero divergences — the first assertion that matters once orchestration
+// runs against real Java and real Go.
+func TestHappyPathIdenticalLogs(t *testing.T) {
+	weights := map[string]float64{"a": 1, "b": 2, "c": 7}
+	log := synthLog(weights, []string{"a", "b", "c"}, []int{100, 200, 700})
+	if mm := ComparePair(log, log, 1000, 2, "fairness-shares"); mm != nil {
+		t.Fatalf("identical logs diverged: %v", mm)
+	}
+}
+
+// TestHappyPathTiePermutation passes when the only difference is order
+// inside a tie group (same (priority, createdAt), different IDs).
+func TestHappyPathTiePermutation(t *testing.T) {
+	weights := map[string]float64{"a": 1, "b": 1}
+	mkLog := func(swap bool) RunLog {
+		a, b := "t1", "t2"
+		if swap {
+			a, b = b, a
+		}
+		return RunLog{
+			Weights: weights,
+			Order: []DispatchRecord{
+				{Seq: 0, TaskID: a, Tenant: "a", Priority: 10},
+				{Seq: 1, TaskID: b, Tenant: "b", Priority: 10},
+			},
+			Created: map[string]int64{"t1": 5, "t2": 5},
+		}
+	}
+	if mm := ComparePair(mkLog(false), mkLog(true), 1000, 2, "fairness-shares"); mm != nil {
+		t.Fatalf("tie-group permutation diverged: %v", mm)
+	}
+}
+
+// TestPairNonTiedOrderDiverges gates exact positions outside tie groups.
+func TestPairNonTiedOrderDiverges(t *testing.T) {
+	weights := map[string]float64{"a": 1, "b": 1}
+	java := RunLog{
+		Weights: weights,
+		Order: []DispatchRecord{
+			{Seq: 0, TaskID: "t1", Tenant: "a", Priority: 10},
+			{Seq: 1, TaskID: "t2", Tenant: "b", Priority: 20},
+		},
+		Created: map[string]int64{"t1": 5, "t2": 6},
+	}
+	goLog := RunLog{
+		Weights: weights,
+		Order: []DispatchRecord{
+			{Seq: 0, TaskID: "t2", Tenant: "b", Priority: 20},
+			{Seq: 1, TaskID: "t1", Tenant: "a", Priority: 10},
+		},
+		Created: map[string]int64{"t1": 5, "t2": 6},
+	}
+	mm := ComparePair(java, goLog, 1000, 2, "fairness-shares")
+	if mm == nil || mm.Dimension != "dispatch-order" {
+		t.Fatalf("expected dispatch-order mismatch, got %v", mm)
 	}
 }
