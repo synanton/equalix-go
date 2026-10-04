@@ -26,6 +26,10 @@ const (
 // LatencyConfig parameterizes the stub. Seed makes every shape
 // reproducible; identical config on both runs is what makes "the
 // schedulers disagree" distinguishable from "the stubs differed."
+// Behavioral property (DECISION-5 class): latency determinism holds
+// independently of error rate — the error stream derives from seed+1, so
+// a calibration run with injected failures reports the same completion
+// timeline as a clean run at the same seed.
 type LatencyConfig struct {
 	Shape    LatencyShape
 	BaseMs   int64

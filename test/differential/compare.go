@@ -32,7 +32,11 @@ type WindowResult struct {
 	Shares     map[string]int
 	Expected   map[string]float64
 	Deviations map[string]float64
-	Pass       bool
+	// Full marks complete windows. The partial tail window is reported,
+	// never gated — and a run with zero full windows cannot gate fairness
+	// at all (see FullWindows): shares are recorded, not claimed.
+	Full bool
+	Pass bool
 }
 
 // Mismatch is the classification block (§7): which dimension diverged,
@@ -85,7 +89,7 @@ func CompareShares(log RunLog, windowSize int, tolerance float64) ([]WindowResul
 		wr := WindowResult{
 			Window: start / windowSize, Shares: counts,
 			Expected: map[string]float64{}, Deviations: map[string]float64{},
-			Pass: true,
+			Full: full, Pass: true,
 		}
 		n := float64(end - start)
 		for tenant, w := range log.Weights {
@@ -117,14 +121,45 @@ func CompareShares(log RunLog, windowSize int, tolerance float64) ([]WindowResul
 	return out, nil
 }
 
-// TieGroups clusters records that tie on (priority, createdAt) — ordering
-// inside a group is explicitly non-gated (§2 match criterion); the
-// clusters are diagnostic output, not verdicts.
+// FullWindows counts complete (gated) windows. Zero means the run had
+// insufficient volume for the windowed gate — shares must be recorded,
+// never claimed as passing. A silent pass on a partial-only run is the
+// vacuous-gate bug: the comparator would approve any distribution,
+// including one contradicting the workload weights.
+func FullWindows(results []WindowResult) int {
+	n := 0
+	for _, w := range results {
+		if w.Full {
+			n++
+		}
+	}
+	return n
+}
+
+// RequireGate fails the calling test unless at least min full windows
+// exist. Calibration fixtures call this before asserting their expected
+// outcome: a fixture whose "expected failure" derives from windowed
+// behavior must run at scale ≥ min full windows, or a vacuous gate would
+// let it pass without exercising anything. Self-checking calibration —
+// fixtures cannot be configured into vacuity.
+func RequireGate(t interface {
+	Helper()
+	Fatalf(string, ...any)
+}, results []WindowResult, min int) {
+	t.Helper()
+	if got := FullWindows(results); got < min {
+		t.Fatalf("only %d full windows, need ≥ %d for the gate to fire — fixture volume too small", got, min)
+	}
+}
+
 type TieKey struct {
 	Priority  int64
 	CreatedAt int64
 }
 
+// TieGroups clusters records that tie on (priority, createdAt) — ordering
+// inside a group is explicitly non-gated (§2 match criterion); the
+// clusters are diagnostic output, not verdicts.
 func TieGroups(order []DispatchRecord, createdAt map[string]int64) [][]DispatchRecord {
 	groups := map[TieKey][]DispatchRecord{}
 	var keys []TieKey
@@ -168,7 +203,7 @@ func ComparePair(java, goLog RunLog, windowSize int, tolerance float64, gate str
 		mm.GoEvidence = summarize(goLog)
 		return mm
 	}
-	if diff := orderDivergence(java, goLog); diff != "" {
+	if diff := OrderDivergence(java, goLog); diff != "" {
 		return &Mismatch{
 			Dimension: "dispatch-order", GateExercised: gate, GateFired: "dispatch-order",
 			JavaEvidence: summarize(java), GoEvidence: summarize(goLog), Detail: diff,
@@ -177,10 +212,16 @@ func ComparePair(java, goLog RunLog, windowSize int, tolerance float64, gate str
 	return nil
 }
 
-// orderDivergence reports position mismatches outside tie groups ("" when
+// OrderDivergence reports position mismatches outside tie groups ("" when
 // the orders agree up to tie-group permutation). Different lengths diverge
 // unconditionally — a missing dispatch is never a tie artifact.
-func orderDivergence(java, goLog RunLog) string {
+//
+// Exported because live runs use it diagnostically: the Go-vs-Go control
+// experiment proved exact-order parity flaky-by-construction across
+// independently-ticking processes (identical binaries diverge on some
+// runs, agree exactly on others). Shares gate; ordering informs. Unit
+// tests keep ComparePair's combined verdict for deterministic inputs.
+func OrderDivergence(java, goLog RunLog) string {
 	if len(java.Order) != len(goLog.Order) {
 		return fmt.Sprintf("lengths differ: java=%d go=%d", len(java.Order), len(goLog.Order))
 	}

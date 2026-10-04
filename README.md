@@ -20,13 +20,15 @@ This is **not a language port**. The Java code is the behavioral reference; the 
 
 | Area | Implemented | Unit/integration tested | Conformance-validated | Benchmark-validated | Differentially validated vs Java |
 |---|---|---|---|---|---|
-| Domain core (virtual time, priority, CMS, selection) | ✅ | ✅ | ✅ (1:2:7 + seeded) | ✅ (hot-path benches) | ⬜ (Phase 5) |
-| Postgres adapter | ✅ | ✅ (testcontainers) | ⬜ | ⬜ | ⬜ (Phase 5) |
-| HTTP surface | ✅ | ✅ (contract tests) | ⬜ | ⬜ | ⬜ (Phase 5) |
-| Jobs (dispatcher, calculator, watchdog, timeout) | ✅ | ✅ | ⬜ | ⬜ | ⬜ (Phase 5) |
+| Domain core (virtual time, priority, CMS, selection) | ✅ | ✅ | ✅ (1:2:7 + seeded) | ✅ (hot-path benches) | 🔶 smoke01 (21 tasks, shares exact; ordering diagnostic) |
+| Postgres adapter | ✅ | ✅ (testcontainers) | ⬜ | ⬜ | 🔶 smoke01 (same run) |
+| HTTP surface | ✅ | ✅ (contract tests) | ⬜ | ⬜ | 🔶 smoke01 (same run) |
+| Jobs (dispatcher, calculator, watchdog, timeout) | ✅ | ✅ | ⬜ | ⬜ | 🔶 smoke01 (same run) |
 | Jobs (recovery) | — (no such service; CORRECTION-2) | — | — | — | — |
 
 `⬜` = not yet; nothing in this table is claimed before its evidence exists.
+`🔶` = ran and produced a comparison (smoke-scale); ✅ requires meaningful
+workloads with real fairness measurement (EQLX-5 gate).
 
 ---
 

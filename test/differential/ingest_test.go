@@ -34,10 +34,13 @@ func TestMarkerFromFirstIngestResponse(t *testing.T) {
 	// submittedAt in the past: no scheduling wait. The marker must still
 	// equal the server stamp, proving it comes from the ingest response
 	// rather than any client-side clock reading.
-	marker, err := SubmitTask(context.Background(), srv.Client(), srv.URL, "key",
+	marker, svcID, err := SubmitTask(context.Background(), srv.Client(), srv.URL, "key",
 		Task{ID: "t", Tenant: "a", Weight: 1, PayloadBytes: 4}, before.Add(-time.Hour))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if svcID != "task-1" {
+		t.Fatalf("service id = %q, want task-1 (harness must track server-minted IDs)", svcID)
 	}
 	if !marker.Equal(serverStamp) {
 		t.Fatalf("marker = %v, want server stamp %v (wall-clock fallback?)", marker, serverStamp)

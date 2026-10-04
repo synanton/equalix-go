@@ -30,11 +30,9 @@ BEGIN
         'tasks', 'client_counts', 'client_sequence_state',
         'client_virtual_time', 'scheduler_virtual_clock', 'hierarchy_node'
     ] LOOP
-        EXECUTE format(
-            'DROP TRIGGER IF EXISTS trg_set_updated_at ON %I; ' ||
-            'CREATE TRIGGER trg_set_updated_at BEFORE INSERT OR UPDATE ON %I ' ||
-            'FOR EACH ROW EXECUTE FUNCTION set_updated_at()',
-            tbl, tbl);
+        EXECUTE format('DROP TRIGGER IF EXISTS trg_set_updated_at ON %I', tbl);
+        EXECUTE format('CREATE TRIGGER trg_set_updated_at BEFORE INSERT OR UPDATE ON %I ' ||
+            'FOR EACH ROW EXECUTE FUNCTION set_updated_at()', tbl);
     END LOOP;
 END;
 $$;
