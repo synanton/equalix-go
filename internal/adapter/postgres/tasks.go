@@ -40,49 +40,56 @@ func (s *TaskStore) Save(ctx context.Context, t *domain.Task) error {
 	if t.CreatedAt.IsZero() {
 		t.CreatedAt = time.Now()
 	}
-	tag, err := s.q.Exec(ctx, `UPDATE tasks SET
+	// updated_at is DB-owned (trigger set_updated_at, migration 00005):
+	// never sent, read back via RETURNING so the struct stays truthful.
+	err := s.q.QueryRow(ctx, `UPDATE tasks SET
             fairness_key = $2, weight = $3, status = $4::task_status,
-            priority = $5, virtual_finish = $6, updated_at = now(),
+            priority = $5, virtual_finish = $6,
             completed_at = $7, retry_count = $8, last_error = $9,
             sequence_number = $10, depends_on_task_id = $11::uuid,
             is_sequential = $12, requires_previous_result = $13,
             version = version + 1
-        WHERE id = $1::uuid AND version = $14`,
+        WHERE id = $1::uuid AND version = $14
+        RETURNING updated_at`,
 		t.ID, t.FairnessKey, t.Weight, string(t.Status),
 		nullableInt(t.Priority, t.HasPriority), nullableFloat(t.VirtualFinish, t.HasPriority),
 		nullableTime(t.CompletedAt), t.RetryCount, nullableText(t.LastError),
 		nullableInt(t.SequenceNumber, t.Sequential), nullableText(t.DependsOnTaskID),
-		t.Sequential, t.RequiresPreviousResult, t.Version)
+		t.Sequential, t.RequiresPreviousResult, t.Version).Scan(&t.UpdatedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return s.insert(ctx, t)
+		}
 		return fmt.Errorf("postgres: update task %s: %w", t.ID, err)
 	}
-	if tag.RowsAffected() == 1 {
-		t.Version++
-		t.UpdatedAt = time.Now()
-		return nil
-	}
-	tag, err = s.q.Exec(ctx, `INSERT INTO tasks
+	t.Version++
+	return nil
+}
+
+func (s *TaskStore) insert(ctx context.Context, t *domain.Task) error {
+	// updated_at omitted: DEFAULT now() on insert (trigger covers UPDATE).
+	err := s.q.QueryRow(ctx, `INSERT INTO tasks
             (id, fairness_key, weight, status, priority, virtual_finish,
-             created_at, updated_at, retry_count, payload, version,
+             created_at, retry_count, payload, version,
              sequence_number, depends_on_task_id, is_sequential,
              requires_previous_result)
-        VALUES ($1::uuid, $2, $3, $4::task_status, $5, $6, $7, now(), $8, '\x', 0,
+        VALUES ($1::uuid, $2, $3, $4::task_status, $5, $6, $7, $8, '\x', 0,
             $9, $10::uuid, $11, $12)
-        ON CONFLICT (id) DO NOTHING`,
+        ON CONFLICT (id) DO NOTHING
+        RETURNING updated_at`,
 		t.ID, t.FairnessKey, t.Weight, string(t.Status),
 		nullableInt(t.Priority, t.HasPriority), nullableFloat(t.VirtualFinish, t.HasPriority),
 		t.CreatedAt, t.RetryCount,
 		nullableInt(t.SequenceNumber, t.Sequential), nullableUUID(t.DependsOnTaskID),
-		t.Sequential, t.RequiresPreviousResult)
+		t.Sequential, t.RequiresPreviousResult).Scan(&t.UpdatedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("postgres: save task %s: %w", t.ID, port.ErrVersionConflict)
+		}
 		return fmt.Errorf("postgres: insert task %s: %w", t.ID, err)
 	}
-	if tag.RowsAffected() == 1 {
-		t.Version = 0
-		t.UpdatedAt = time.Now()
-		return nil
-	}
-	return fmt.Errorf("postgres: save task %s: %w", t.ID, port.ErrVersionConflict)
+	t.Version = 0
+	return nil
 }
 
 // FindByID loads one task or returns port.ErrNotFound.

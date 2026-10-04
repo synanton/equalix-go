@@ -33,8 +33,19 @@ func (d *driftRecorder) PublishDrift(m map[string]int64) {
 	d.reports = append(d.reports, cp)
 }
 
-func backdate(t *testing.T, id string, age time.Duration) {
+// backdateUpdated sets updated_at explicitly. The set_updated_at trigger
+// would override a plain UPDATE, so it is disabled for this statement only
+// (testcontainers runs as superuser; production code never does this).
+func backdateUpdated(t *testing.T, id string, age time.Duration) {
 	t.Helper()
+	if _, err := pool.Exec(ctx, `ALTER TABLE tasks DISABLE TRIGGER trg_set_updated_at`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := pool.Exec(ctx, `ALTER TABLE tasks ENABLE TRIGGER trg_set_updated_at`); err != nil {
+			t.Fatal(err)
+		}
+	}()
 	if _, err := pool.Exec(ctx, `UPDATE tasks SET updated_at = now() - ($1::text || ' milliseconds')::interval WHERE id = $2::uuid`,
 		fmt.Sprintf("%d", int64(age/time.Millisecond)), id); err != nil {
 		t.Fatal(err)
@@ -59,14 +70,14 @@ func TestTimeoutSweepReleasesStuckSlots(t *testing.T) {
 	if err := tasks.Save(ctx, plain); err != nil {
 		t.Fatal(err)
 	}
-	backdate(t, uuid(100), 2*time.Hour)
+	backdateUpdated(t, uuid(100), 2*time.Hour)
 	seq := &domain.Task{ID: uuid(101), FairnessKey: "s", Weight: 1,
 		Status: domain.StatusDispatched, Sequential: true, SequenceNumber: 3,
 		CreatedAt: time.Now()}
 	if err := tasks.Save(ctx, seq); err != nil {
 		t.Fatal(err)
 	}
-	backdate(t, uuid(101), 2*time.Hour)
+	backdateUpdated(t, uuid(101), 2*time.Hour)
 	if _, err := seqs.FindOrCreate(ctx, "s"); err != nil {
 		t.Fatal(err)
 	}

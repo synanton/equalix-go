@@ -103,10 +103,9 @@ func (f *fakeTasks) FindStarved(_ context.Context, _ time.Duration, _ int) ([]*d
 func (f *fakeTasks) FindTimedOut(_ context.Context, olderThan time.Duration, limit int) ([]*domain.Task, error) {
 	f.b.mu.Lock()
 	defer f.b.mu.Unlock()
-	now := f.b.now
 	var out []*domain.Task
 	for _, t := range f.b.tasks {
-		if t.Status.IsInFlight() && now.Sub(t.UpdatedAt) > olderThan {
+		if t.Status.IsInFlight() && f.b.now.Sub(t.UpdatedAt) > olderThan {
 			out = append(out, t)
 			if len(out) >= limit {
 				break
@@ -128,13 +127,6 @@ func (f *fakeTasks) CountInFlight(_ context.Context) (map[string]int, error) {
 	return out, nil
 }
 
-func (f *fakeTasks) FindNextSequential(_ context.Context, _ string, _ int64) (*domain.Task, error) {
-	return nil, nil
-}
-
-func (f *fakeTasks) ListByKey(_ context.Context, _ string, _ *domain.Status) ([]*domain.Task, error) {
-	return nil, nil
-}
 func (f *fakeTasks) CountReceived(_ context.Context) (int, error) {
 	f.b.mu.Lock()
 	defer f.b.mu.Unlock()
@@ -145,6 +137,14 @@ func (f *fakeTasks) CountReceived(_ context.Context) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+func (f *fakeTasks) FindNextSequential(_ context.Context, _ string, _ int64) (*domain.Task, error) {
+	return nil, nil
+}
+
+func (f *fakeTasks) ListByKey(_ context.Context, _ string, _ *domain.Status) ([]*domain.Task, error) {
+	return nil, nil
 }
 
 type fakeCounts struct{ b *fakeBacking }
@@ -328,8 +328,7 @@ func TestCalculatorTagsReceived(t *testing.T) {
 	r := newRig()
 	seedReceived(r, "a", 1, 3, 0)
 	calc := NewCalculator(CalculatorDeps{
-		Tasks: r.tasks, Sequences: r.seqs, VT: r.vt, CMS: r.cms,
-		Metrics: fakeMetrics{}, Config: testConfig(),
+		Tasks: r.tasks, Sequences: r.seqs, VT: r.vt, CMS: r.cms, Config: testConfig(),
 	})
 	if err := calc.tick(context.Background()); err != nil {
 		t.Fatal(err)
@@ -345,8 +344,7 @@ func TestDispatcherTickEndToEnd(t *testing.T) {
 	r := newRig()
 	seedReceived(r, "a", 1, 4, 0)
 	calc := NewCalculator(CalculatorDeps{
-		Tasks: r.tasks, Sequences: r.seqs, VT: r.vt, CMS: r.cms,
-		Metrics: fakeMetrics{}, Config: testConfig(),
+		Tasks: r.tasks, Sequences: r.seqs, VT: r.vt, CMS: r.cms, Config: testConfig(),
 	})
 	exec := &fakeExecutor{committed: true}
 	pool := NewSendPool(8)
@@ -392,8 +390,7 @@ func TestDispatcherLeavesFailedForTimeout(t *testing.T) {
 	r := newRig()
 	seedReceived(r, "a", 1, 1, 0)
 	calc := NewCalculator(CalculatorDeps{
-		Tasks: r.tasks, Sequences: r.seqs, VT: r.vt, CMS: r.cms,
-		Metrics: fakeMetrics{}, Config: testConfig(),
+		Tasks: r.tasks, Sequences: r.seqs, VT: r.vt, CMS: r.cms, Config: testConfig(),
 	})
 	exec := &fakeExecutor{fail: true}
 	pool := NewSendPool(8)
@@ -423,9 +420,17 @@ func TestDispatcherLeavesFailedForTimeout(t *testing.T) {
 	}
 }
 
-type recordingMetrics struct {
+type driftCatcher struct {
 	fakeMetrics
-	mu chan struct{}
+	reports []map[string]int64
+}
+
+func (d *driftCatcher) PublishDrift(m map[string]int64) {
+	cp := map[string]int64{}
+	for k, v := range m {
+		cp[k] = v
+	}
+	d.reports = append(d.reports, cp)
 }
 
 func TestWatchdogRepairsAndRebuilds(t *testing.T) {
@@ -455,22 +460,10 @@ func TestWatchdogRepairsAndRebuilds(t *testing.T) {
 	}
 }
 
-type driftCatcher struct {
-	fakeMetrics
-	reports []map[string]int64
-}
-
-func (d *driftCatcher) PublishDrift(m map[string]int64) {
-	cp := map[string]int64{}
-	for k, v := range m {
-		cp[k] = v
-	}
-	d.reports = append(d.reports, cp)
-}
-
 func TestTimeoutExpiresAndReleases(t *testing.T) {
 	r := newRig()
 	now := time.Now()
+	r.backing.now = now
 	r.backing.tasks["t1"] = &domain.Task{
 		ID: "t1", FairnessKey: "a", Status: domain.StatusDispatched,
 		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),

@@ -25,11 +25,6 @@ type TimeoutDeps struct {
 }
 
 // Timeout marks over-age in-flight tasks TIMEOUT and releases slots.
-// Canonical sweep method is Tasks.FindTimedOut (pre-existing EQLX-2 port:
-// duration in, DB-time `now() - interval` in SQL, no caller clock). The
-// 3b scope prose once named a hypothetical SweepTimeouts(ctx, now) — no
-// such port method was ever defined, so no rename occurred; this doc is
-// the record that FindTimedOut is the single canonical name EQLX-5 reads.
 type Timeout struct {
 	deps TimeoutDeps
 }
@@ -57,10 +52,10 @@ func (s *Timeout) Run(ctx context.Context) error {
 // TickForTest runs one sweep. Exported for tests and fault-injection.
 func (s *Timeout) TickForTest(ctx context.Context) error { return s.tick(ctx) }
 
-// tick expires one batch. Selection is DB-time (`now() - interval` in
-// SQL, duration param only — no clock skew class: every instance agrees on
-// the reference point, matching Java's `now()`-in-SQL queries). Write
-// stamps (CompletedAt/LastError) use the domain clock, matching Java's
+// tick expires one batch. Selection is DB-time (`now() - interval` in SQL,
+// duration param only — no clock-skew class: every instance agrees on the
+// reference point, matching Java's `now()`-in-SQL queries). Write stamps
+// (CompletedAt/LastError) use the domain clock, matching Java's
 // `Instant.now(clock)` on writes. Per task: DB half (status + counts) in
 // Transact (closes window (1)); CMS decrement post-commit. A task that
 // moved concurrently (version conflict or non-in-flight on re-read) is
