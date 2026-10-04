@@ -44,6 +44,15 @@ below is inferred. Defaults from `application.yml` (spec §10).
 - Java evaluates **only on `recordCompletion`** (webhook arrivals), gated
   by `min-samples` (10) and one adjustment per `adjustment-interval-ms`
   (2000). Go's `FailedSends` fires **at send time**.
+- **Read path (pinned): narrow interface, not Metrics, not a new port.**
+  The controller takes `Failures interface{ FailedSends() uint64 }` and
+  the dispatcher hands it the `*SendPool` (which already exposes exactly
+  that method). Rationale: mirroring the counter into Metrics would route
+  a control-plane input through an observability port, and a new port
+  method would widen the hexagonal boundary for one consumer. The narrow
+  interface keeps the dependency visible (`ControllerDeps.Failures`) and
+  fakes trivial (atomic counter stub). Recorded here so the implementation
+  doesn't silently pick an alternative EQLX-5 would have to rediscover.
 - **Visibility analysis (pinned):** differences below one adjustment
   interval are invisible — both sides quantize to 2s evaluation steps, so
   a send-failure seen 200ms "early" lands in the same evaluation bucket
