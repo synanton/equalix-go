@@ -18,6 +18,11 @@ import (
 // never time.Now() at driver start, never the client-side request time.
 // If the driver fell back to wall-clock anywhere, JVM warmup would leak
 // into Go's timeline.
+//
+// NOTE (found by test): a future submittedAt makes this block until that
+// instant — correct behavior (the scheduler waits for the right moment),
+// not a hang. Always pass offsets resolved against run start, never
+// absolute timestamps; see the workload format's offset rules.
 func SubmitTask(ctx context.Context, client *http.Client, baseURL, apiKey string, t Task, submittedAt time.Time) (time.Time, error) {
 	if wait := time.Until(submittedAt); wait > 0 {
 		select {

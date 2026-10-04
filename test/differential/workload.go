@@ -76,6 +76,12 @@ func Load(path string) ([]Task, error) {
 		if t.SubmittedAtOffsetMs < 0 {
 			return nil, fmt.Errorf("differential: line %d: negative submitted_at offset", line)
 		}
+		// A created_at in the future relative to submit would schedule a
+		// wait inside SubmitTask (correct behavior, not a hang) and skew
+		// the run; created_at must not lead submission.
+		if t.CreatedAtOffsetMs > t.SubmittedAtOffsetMs {
+			return nil, fmt.Errorf("differential: line %d: created_at offset after submitted_at offset", line)
+		}
 		if !first && t.SubmittedAtOffsetMs < lastSubmitted {
 			return nil, fmt.Errorf("differential: line %d: submit schedule decreases", line)
 		}

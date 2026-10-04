@@ -36,6 +36,7 @@ func TestLoadRejects(t *testing.T) {
 	cases := map[string]string{
 		"negative created offset": `{"id":"a","tenant":"t","weight":1,"created_at_offset_ms":-1,"submitted_at_offset_ms":0}`,
 		"negative submit offset":  `{"id":"a","tenant":"t","weight":1,"created_at_offset_ms":0,"submitted_at_offset_ms":-1}`,
+		"created after submit":    `{"id":"a","tenant":"t","weight":1,"created_at_offset_ms":10,"submitted_at_offset_ms":5}`,
 		"empty id":                `{"id":"","tenant":"t","weight":1,"created_at_offset_ms":0,"submitted_at_offset_ms":0}`,
 		"empty tenant":            `{"id":"a","tenant":"","weight":1,"created_at_offset_ms":0,"submitted_at_offset_ms":0}`,
 		"zero weight":             `{"id":"a","tenant":"t","weight":0,"created_at_offset_ms":0,"submitted_at_offset_ms":0}`,
