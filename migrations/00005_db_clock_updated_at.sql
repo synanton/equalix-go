@@ -1,6 +1,6 @@
 -- Goose migration 00005: DB-clock ownership of updated_at.
 -- Mirrors Java V6__unify_timestamps_db_clock.sql (same trigger, same tables).
--- A single BEFORE UPDATE trigger stamps updated_at from the DB clock on
+-- A single BEFORE INSERT OR UPDATE trigger stamps updated_at from the DB clock on
 -- every write path — app code, psql, future tools — eliminating the
 -- cross-instance skew class between process-stamped writes and SQL-now()
 -- reads. App-side updated_at assignments become dead writes; both adapters
