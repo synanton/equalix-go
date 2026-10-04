@@ -168,7 +168,7 @@ func ComparePair(java, goLog RunLog, windowSize int, tolerance float64, gate str
 		mm.GoEvidence = summarize(goLog)
 		return mm
 	}
-	if diff := orderDivergence(java, goLog); diff != "" {
+	if diff := OrderDivergence(java, goLog); diff != "" {
 		return &Mismatch{
 			Dimension: "dispatch-order", GateExercised: gate, GateFired: "dispatch-order",
 			JavaEvidence: summarize(java), GoEvidence: summarize(goLog), Detail: diff,
@@ -177,10 +177,16 @@ func ComparePair(java, goLog RunLog, windowSize int, tolerance float64, gate str
 	return nil
 }
 
-// orderDivergence reports position mismatches outside tie groups ("" when
+// OrderDivergence reports position mismatches outside tie groups ("" when
 // the orders agree up to tie-group permutation). Different lengths diverge
 // unconditionally — a missing dispatch is never a tie artifact.
-func orderDivergence(java, goLog RunLog) string {
+//
+// Exported because live runs use it diagnostically: the Go-vs-Go control
+// experiment proved exact-order parity flaky-by-construction across
+// independently-ticking processes (identical binaries diverge on some
+// runs, agree exactly on others). Shares gate; ordering informs. Unit
+// tests keep ComparePair's combined verdict for deterministic inputs.
+func OrderDivergence(java, goLog RunLog) string {
 	if len(java.Order) != len(goLog.Order) {
 		return fmt.Sprintf("lengths differ: java=%d go=%d", len(java.Order), len(goLog.Order))
 	}

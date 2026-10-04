@@ -64,12 +64,13 @@ else provides.
 | 10 | Recovery (kill-9 → TIMEOUT + slot release, timed) | as-fast-as-possible | both complete; durations reported, no bound |
 | 11 | Scalability (shares at 2× tenants) | as-fast-as-possible | §4 bound holds |
 | 12 | Stability (24h soak: drift, RSS growth, RPS variance) | fixed-rate | zero unrepaired drift; RSS slope ≈ 0 |
-| 13 | Dispatch ordering parity (per-task position) | as-fast-as-possible | §4 match criterion |
+| 13 | Dispatch ordering evidence (per-task position) | as-fast-as-possible | recorded, never gated (control-proven flaky) |
 
 Rows 1–7, 12 are *report-only*: Go and Java differ honestly in runtime
 characteristics, and a parity bound there would be either vacuous or
-dishonest. Rows 8, 9, 11, 13 carry bounds — those are the scheduler
+dishonest. Rows 8, 9, 11 carry bounds — those are the scheduler
 semantics. Row 10 is completion-gated (both finish) with reported timing.
+Row 13 is evidence-only per the match criterion above.
 
 ### 2. Workload definition — full task specification, seeded executor
 
@@ -95,13 +96,19 @@ semantics. Row 10 is completion-gated (both finish) with reported timing.
 - **Run-start marker (pinned):** the first ingest call accepted by the
   service under test. Both timelines align on their own first ingest, so
   JVM warmup duration never leaks into Go's timeline or vice versa.
-- **Match criterion (pinned): aggregate fairness is the acceptance
-  criterion; task-level ordering is diagnostic.** Within a tie group
-  (equal priority *and* equal created_at), order may differ without
-  failing the run; the harness reports tie-group divergence separately
-  but does not gate on it. Ordering parity at exact positions is asserted
-  only outside tie groups. This is stated here so a future
-  "ordering diverged" report is read correctly on day one.
+- **Match criterion (pinned, revised by the Go-vs-Go control): aggregate
+  fairness gates; ordering is evidence, never verdict.** Within a tie group
+  (equal priority *and* equal created_at), order may differ without failing
+  the run; tie-group divergence is reported, not gated. Exact dispatch
+  positions do not gate even outside tie groups: the Go-vs-Go control
+  (identical binaries, same workload, separate DBs) agrees exactly on some
+  runs and diverges on others — tick/ingest interleaving differs per
+  process, virtual-time histories diverge with it, and shares still
+  converge exactly. Exact-order parity across independently-ticking
+  processes is therefore flaky-by-construction, including Java-vs-Java;
+  gating on it would fail identical implementations. Row 13's bound is
+  restated accordingly: per-task positions are recorded evidence for
+  debugging, not an acceptance criterion.
 - **Arrival discipline:** the file lists tasks in submission order with
   `submitted_at` offsets; the driver replays them on a fixed schedule
   (fixed-rate mode) or as fast as the service accepts (as-fast-as-possible

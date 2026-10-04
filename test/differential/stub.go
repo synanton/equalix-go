@@ -168,3 +168,11 @@ func (s *Stub) Close(ctx context.Context) ([]DispatchEntry, error) {
 	}
 	return out, nil
 }
+
+// Count returns dispatches observed so far (quiescence bookkeeping;
+// Close remains the only way to obtain the log itself).
+func (s *Stub) Count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.entries)
+}

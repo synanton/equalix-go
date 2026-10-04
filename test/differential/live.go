@@ -10,13 +10,49 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // SideResult is one scheduler's observed run: dispatch log plus the
-// run-start marker (first accepted ingest's server stamp).
+// run-start marker (first accepted ingest's server stamp) plus the warmup
+// prefix length (dispatches that fired before calculator quiescence —
+// startup transient, excluded from ordering comparison, included in
+// shares per the scope's window rule).
 type SideResult struct {
 	Log    RunLog
 	Marker time.Time
+	Warmup int
+}
+
+// waitQuiesced polls until no RECEIVED rows remain (calculator drained)
+// via direct DB read — uniform across both schedulers, no API dependency.
+// Returns the number of stub dispatches observed so far: the warmup prefix.
+func waitQuiesced(ctx context.Context, dsn string, stub *Stub, timeout time.Duration) (int, error) {
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return 0, fmt.Errorf("differential: quiescence connect: %w", err)
+	}
+	defer conn.Close(ctx)
+	deadline := time.Now().Add(timeout)
+	for {
+		var n int
+		if err := conn.QueryRow(ctx,
+			`SELECT COUNT(*) FROM tasks WHERE status = 'RECEIVED'`).Scan(&n); err != nil {
+			return 0, fmt.Errorf("differential: quiescence poll: %w", err)
+		}
+		if n == 0 {
+			return stub.Count(), nil
+		}
+		if time.Now().After(deadline) {
+			return 0, fmt.Errorf("differential: RECEIVED did not drain in %v", timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }
 
 // RunSide drives one scheduler through a full workload against an already
@@ -48,6 +84,18 @@ func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task
 		created[t.ID] = stamp.UnixMilli()
 		svcIDs[t.ID] = svcID
 		svcToWorkload[svcID] = t.ID
+	}
+	// Quiescence: wait until the calculator tagged everything. Dispatches
+	// observed so far form the warmup prefix (startup transient).
+	// Empty DSN skips the wait (fakes/backends without SQL visibility);
+	// live runs must pass a DSN or the transient is unmeasured.
+	warmup := 0
+	if svc.DSN != "" {
+		var err error
+		warmup, err = waitQuiesced(ctx, svc.DSN, stub, drainTimeout)
+		if err != nil {
+			return out, err
+		}
 	}
 	// Drain: every submitted task terminal (or deadline → loud failure,
 	// never a silent partial comparison).
@@ -97,7 +145,7 @@ func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task
 	for i := range order {
 		order[i].Priority = priorities[order[i].TaskID]
 	}
-	out = SideResult{Log: RunLog{Weights: weights, Order: order, Created: created}, Marker: marker}
+	out = SideResult{Log: RunLog{Weights: weights, Order: order, Created: created}, Marker: marker, Warmup: warmup}
 	return out, nil
 }
 
