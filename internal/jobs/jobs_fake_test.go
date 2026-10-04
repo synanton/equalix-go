@@ -419,3 +419,99 @@ func TestDispatcherLeavesFailedForTimeout(t *testing.T) {
 		t.Fatalf("failed sends = %d, want 1", pool.FailedSends())
 	}
 }
+
+type driftCatcher struct {
+	fakeMetrics
+	reports []map[string]int64
+}
+
+func (d *driftCatcher) PublishDrift(m map[string]int64) {
+	cp := map[string]int64{}
+	for k, v := range m {
+		cp[k] = v
+	}
+	d.reports = append(d.reports, cp)
+}
+
+func TestWatchdogRepairsAndRebuilds(t *testing.T) {
+	r := newRig()
+	// Truth: 2 in-flight for "a". Counts say 5 (drift), CMS says 0.
+	r.backing.tasks["w1"] = &domain.Task{ID: "w1", FairnessKey: "a", Status: domain.StatusDispatched}
+	r.backing.tasks["w2"] = &domain.Task{ID: "w2", FairnessKey: "a", Status: domain.StatusCommitted}
+	r.backing.counts.Set("a", 5)
+	rec := &driftCatcher{}
+	w := NewWatchdog(WatchdogDeps{
+		Tasks: r.tasks, Counts: r.counts, CMS: r.cms, Metrics: rec, Config: testConfig(),
+	})
+	if err := w.TickForTest(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.backing.counts.Get("a"); got != 2 {
+		t.Fatalf("counts = %d, want repaired 2", got)
+	}
+	if len(rec.reports) != 1 {
+		t.Fatalf("drift reports = %d, want 1", len(rec.reports))
+	}
+	if rec.reports[0]["a"] != -2 {
+		t.Fatalf("drift[a] = %d, want estimate(0)-actual(2)", rec.reports[0]["a"])
+	}
+	if got, _ := r.cms.Total(context.Background()); got != 2 {
+		t.Fatalf("cms total = %d, want rebuilt 2", got)
+	}
+}
+
+func TestTimeoutExpiresAndReleases(t *testing.T) {
+	r := newRig()
+	now := time.Now()
+	r.backing.now = now
+	r.backing.tasks["t1"] = &domain.Task{
+		ID: "t1", FairnessKey: "a", Status: domain.StatusDispatched,
+		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+	}
+	r.backing.counts.Set("a", 1)
+	r.backing.cms["a"] = 1
+	s := NewTimeout(TimeoutDeps{
+		Tx: r.tx, Tasks: r.tasks, Counts: r.counts, Sequences: r.seqs,
+		CMS: r.cms, Config: func() Config {
+			c := testConfig()
+			c.TaskTimeout = time.Minute
+			return c
+		}(), Clock: domain.NewFakeClock(now),
+	})
+	if err := s.TickForTest(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := r.tasks.FindByID(context.Background(), "t1")
+	if got.Status != domain.StatusTimeout {
+		t.Fatalf("status = %s, want TIMEOUT", got.Status)
+	}
+	if n := r.backing.counts.Get("a"); n != 0 {
+		t.Fatalf("counts = %d, want released 0", n)
+	}
+	if v, _ := r.cms.EstimateCount(context.Background(), "a"); v != 0 {
+		t.Fatalf("cms = %d, want released 0", v)
+	}
+}
+
+func TestTimeoutDisabledIsNoop(t *testing.T) {
+	r := newRig()
+	cfg := testConfig()
+	cfg.TaskTimeout = 0
+	s := NewTimeout(TimeoutDeps{Tx: r.tx, Config: cfg})
+	if err := s.TickForTest(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTimeoutSkipsNonInflight(t *testing.T) {
+	// Empty rig: nothing in flight, sweep is a no-op (exercises the full
+	// deps path with no victims rather than nil ports).
+	r := newRig()
+	s := NewTimeout(TimeoutDeps{
+		Tx: r.tx, Tasks: r.tasks, Counts: r.counts, Sequences: r.seqs,
+		CMS: r.cms, Config: testConfig(),
+	})
+	if err := s.TickForTest(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

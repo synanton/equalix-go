@@ -74,6 +74,7 @@ func startPostgres(ctx context.Context) (*pgxpool.Pool, func(), error) {
 		"00002_sequential.sql",
 		"00003_virtual_time.sql",
 		"00004_hierarchy.sql",
+		"00005_db_clock_updated_at.sql",
 	} {
 		if err := applyMigration(ctx, pool, f); err != nil {
 			return nil, nil, err

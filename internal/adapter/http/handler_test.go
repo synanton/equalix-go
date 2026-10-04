@@ -93,6 +93,18 @@ func (f *fakeTasks) ListByKey(_ context.Context, key string, status *domain.Stat
 	return out, nil
 }
 
+func (f *fakeTasks) CountReceived(_ context.Context) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, t := range f.tasks {
+		if t.Status == domain.StatusReceived {
+			n++
+		}
+	}
+	return n, nil
+}
+
 type fakeCounts struct {
 	mu sync.Mutex
 	m  map[string]int
