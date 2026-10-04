@@ -23,6 +23,15 @@ else provides.
   tasks table across two schedulers). The stub executor is a shared
   *protocol* both schedulers speak (dispatch receive → webhook complete);
   scheduler-side code never knows it is a fixture.
+- **Single harness-owned stub (pinned):** one stub instance serves a run;
+  the next run constructs a fresh instance. No per-language stubs (nothing
+  to keep identical across repos), no reset endpoint, no run tags —
+  identical stub behavior by construction, and the unified dispatch log is
+  exactly what the comparator consumes. Reset boundary is instance exit:
+  [start stub] → [start scheduler] → [ingest] → [drain] → [teardown,
+  capturing the log]. The wire contract lives in `test/differential`
+  (`PROTOCOL.md` section of `protocol.go`): both schedulers implement
+  against the written contract.
 - **Falsification first — and on every run, not once:** the harness's
   first passing test runs a known-bad dispatcher and must report mismatch.
   The fixture: `FirstQueuedDispatcher` — a `port.TaskRepository` decorator
