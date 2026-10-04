@@ -77,7 +77,7 @@ below is inferred. Defaults from `application.yml` (spec §10).
   other is a scope violation, noted here so a future "reduce flapping"
   change doesn't halve the threshold while leaving confirmations at 3.
 
-### 4. Latency field — dispatch-stamped, citing the NOTE
+### 4. Latency field and contract — documented mixed (decided)
 
 - **Pinned: `durationMs = completionTime − task.UpdatedAt`,** where
   `UpdatedAt` is the last status-write stamp (≈ dispatch time in the
@@ -86,9 +86,17 @@ below is inferred. Defaults from `application.yml` (spec §10).
   minus the entity's `updatedAt`, read before the completion save bumps
   it). **Not** `CreatedAt` (queueing time would poison the signal with
   backlog waits — the NOTE's whole point).
-- The mixed-clock NOTE applies verbatim: Go stamps/sweeps in DB time on
-  both halves where Java mixes JVM/DB. Same observable under sync,
-  self-consistent under skew. No new handling; cited, not re-solved.
+- **Contract (decided, not deferred): documented mixed-clock computation.**
+  `updatedAt` is DB-clock but the completion instant is process-clock on
+  both sides — a deliberate parity choice over SQL-computed latency (JPA
+  has no clean `RETURNING`; changing the oracle's duration flow risks
+  differential drift in the exact quantity this controller tunes). Error
+  bound: app-host-vs-DB-host skew δ. At the 200ms default target, δ=10ms
+  is 5% — acceptable. At a 50ms LLM-serving target it would be 20% — not
+  acceptable; such deployments tighten NTP or revisit SQL latency. **App
+  hosts need NTP after all** (narrowed claim); the DB host needs it
+  absolutely. Cites the clock-unify NOTE; states the bound numerically so
+  EQLX-5 knows what "parity" tolerates.
 
 ### 5. Failure surface — degrade to fixed, never to zero
 
@@ -96,15 +104,27 @@ below is inferred. Defaults from `application.yml` (spec §10).
   stability and returns; `getCurrentRps` stays frozen (initial value if
   never enabled). Go parity: disabled → fixed `penalty_factor` config
   (already the pre-EQLX-4 behavior — the flag path already exists).
-- **Input errors (CMS estimate fails, metrics emit fails):** the tick
-  logs and holds last RPS — controller inputs are advisory, never fatal
-  to the dispatch loop. No error propagates out of `recordCompletion`.
+- **Degradation targets, per source (pinned):**
+  - *Redis down:* N/A until the Redis CMS adapter exists (EQLX-3-out).
+    The local sketch cannot fail; when the Redis adapter lands it carries
+    the specified `fallback-to-local` behavior, and the controller never
+    sees the difference (it reads estimates, not connections).
+  - *CMS estimate unavailable (error return):* treat the sample as
+    latency-only — record duration, skip pressure input for that
+    completion, hold last RPS. Estimates feed priority pressure, not
+    throttle state; a missing estimate must not move the throttle.
+  - *Metrics emit fails:* log and continue. Telemetry is write-only
+    observability; it never feeds back into throttle decisions, so its
+    failure cannot change RPS by construction.
+  - *Catch-all:* any input error → hold last RPS. The only RPS mutations
+    are the evaluated adjustments (§§1–3); nothing else in the controller
+    assigns the value.
 - **Degenerate configs** are rejected at construction (§1 validation),
   so runtime needs no `NaN`/divide-by-zero guards beyond the NaN seed,
   which is the defined initial state, not an error.
 - **What the controller never does:** return 0, block, allocate per
   completion beyond the bounded window (ArrayDeque capped at
-  `window-size`), orConsult any clock except evaluation gating
+  `window-size`), or consult any clock except evaluation gating
   (`clock.millis()` for the interval check only).
 
 ---
@@ -122,6 +142,44 @@ below is inferred. Defaults from `application.yml` (spec §10).
   info/debug exactly as Java (`Emergency RPS brake`, `RPS decreased…`,
   `RPS increased`, dampened at debug).
 - gRPC, Kafka, migrate-on-startup: unchanged, later phases.
+
+---
+
+## Metrics emitted (separate numbers, not one scheduler number)
+
+EQLX-5 benchmarks the service as composed signals, never as one opaque
+number. EQLX-4 emits, with fairness evidence attached at measurement time:
+
+- `dispatch_decision_latency` — hot-path selection cost (priority compute
+  + select, no I/O).
+- `timeout_detection_latency` — dispatch-to-TIMEOUT delta (sweep
+  responsiveness).
+- `watchdog_reconciliation_duration` — tick duration (the GROUP BY gate
+  evidence: 20k rows → ~190ms measured in 3b).
+- `cms_warmup_duration` — startup rebuild time.
+- `rps_target`, `rps_current` — controller setpoint vs actual.
+- `brake_active`, `deadband_active` — 0/1 state gauges so throttle
+  behavior is visible without inferring it from RPS steps.
+
+---
+
+## Testing strategy (time-series controller, FakeClock-driven)
+
+Unit tests inject latency/error samples against a `FakeClock` and assert
+throttle *state transitions* (not wall-clock behavior). Fault-injection
+points, mirroring 3b's pattern:
+
+- Inject sustained high latency → RPS steps down ×0.9 per interval;
+  assert monotonic decrease to the new equilibrium.
+- Inject error rate above threshold → emergency brake ×0.5 per interval
+  to floor; assert no confirmation delay (brake bypasses the dampener).
+- Restore healthy latency → RPS ramps ×1.05 back; assert recovery.
+- Oscillate latency ±30% around target → RPS stays within one step
+  (dead-band absorbs; reversal counter resets in-band).
+- Cold start: fresh controller + 2×-target latency from sample zero →
+  pinned at floor, never zero; ramp on restore.
+- Disabled controller: samples recorded nowhere, RPS frozen, no panic on
+  empty window (NaN seed is a defined state).
 
 ---
 
