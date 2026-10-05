@@ -263,8 +263,11 @@ func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task
 	}
 	entries = entries[measureFrom:]
 	var order []DispatchRecord
+	// T2 rides the final literal below (a fresh SideResult would clobber a
+	// field set here): capture the first receive time in a local.
+	var firstDispatch time.Time
 	if len(entries) > 0 {
-		out.FirstDispatch = entries[0].Received
+		firstDispatch = entries[0].Received
 	}
 	seq := 0
 	for _, e := range entries {
@@ -294,6 +297,7 @@ func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task
 		order[i].Priority = priorities[order[i].TaskID]
 	}
 	out = SideResult{Log: RunLog{Weights: weights, Order: order, Created: created}, Marker: marker, Warmup: warmup}
+	out.FirstDispatch = firstDispatch
 	return out, nil
 }
 
