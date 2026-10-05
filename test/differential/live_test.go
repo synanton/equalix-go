@@ -82,6 +82,10 @@ func (f *fakeScheduler) handler() http.Handler {
 		if r.Method == http.MethodGet {
 			f.mu.Lock()
 			t, ok := f.tasks[rest]
+			var snap fakeTask
+			if ok {
+				snap = *t // copy under lock; dispatch mutates concurrently
+			}
 			f.mu.Unlock()
 			if !ok {
 				w.WriteHeader(http.StatusNotFound)
@@ -89,8 +93,8 @@ func (f *fakeScheduler) handler() http.Handler {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": t.id, "fairnessKey": t.tenant, "status": t.status,
-				"priority": t.priority, "createdAt": t.created.Format(time.RFC3339Nano),
+				"id": snap.id, "fairnessKey": snap.tenant, "status": snap.status,
+				"priority": snap.priority, "createdAt": snap.created.Format(time.RFC3339Nano),
 			})
 			return
 		}

@@ -78,3 +78,148 @@ func (f *FirstQueued) CountReceived(ctx context.Context) (int, error) {
 }
 
 var _ port.TaskRepository = (*FirstQueued)(nil)
+
+// Starving decorates a repository to starve one tenant: the first skipCalls
+// FindAndLock calls filter the key out entirely, later calls delegate.
+// The backlog persists, so the key floods back afterward — sustained
+// zero-dispatch windows followed by catch-up, which is exactly the shape
+// CheckStarvation detects while long-window shares recover.
+type Starving struct {
+	inner port.TaskRepository
+	key   string
+	skip  int
+	calls int
+}
+
+// Starve wraps inner, starving key for the first skipCalls selections.
+func Starve(inner port.TaskRepository, key string, skipCalls int) *Starving {
+	return &Starving{inner: inner, key: key, skip: skipCalls}
+}
+
+func (s *Starving) FindAndLockDispatchable(ctx context.Context, limit, maxPerClient int) ([]*domain.Task, error) {
+	tasks, err := s.inner.FindAndLockDispatchable(ctx, limit, maxPerClient)
+	if err != nil {
+		return nil, err
+	}
+	s.calls++
+	if s.calls > s.skip {
+		return tasks, nil
+	}
+	kept := tasks[:0:0]
+	for _, t := range tasks {
+		if t.FairnessKey != s.key {
+			kept = append(kept, t)
+		}
+	}
+	return kept, nil
+}
+
+func (s *Starving) FindReceived(ctx context.Context, limit int) ([]*domain.Task, error) {
+	return s.inner.FindReceived(ctx, limit)
+}
+
+func (s *Starving) FindByID(ctx context.Context, id string) (*domain.Task, error) {
+	return s.inner.FindByID(ctx, id)
+}
+
+func (s *Starving) Save(ctx context.Context, t *domain.Task) error {
+	return s.inner.Save(ctx, t)
+}
+
+func (s *Starving) FindStarved(ctx context.Context, olderThan time.Duration, limit int) ([]*domain.Task, error) {
+	return s.inner.FindStarved(ctx, olderThan, limit)
+}
+
+func (s *Starving) FindTimedOut(ctx context.Context, olderThan time.Duration, limit int) ([]*domain.Task, error) {
+	return s.inner.FindTimedOut(ctx, olderThan, limit)
+}
+
+func (s *Starving) CountInFlight(ctx context.Context) (map[string]int, error) {
+	return s.inner.CountInFlight(ctx)
+}
+
+func (s *Starving) FindNextSequential(ctx context.Context, key string, seq int64) (*domain.Task, error) {
+	return s.inner.FindNextSequential(ctx, key, seq)
+}
+
+func (s *Starving) ListByKey(ctx context.Context, key string, status *domain.Status) ([]*domain.Task, error) {
+	return s.inner.ListByKey(ctx, key, status)
+}
+
+func (s *Starving) CountReceived(ctx context.Context) (int, error) {
+	return s.inner.CountReceived(ctx)
+}
+
+var _ port.TaskRepository = (*Starving)(nil)
+
+// QuotaIgnoring decorates a repository to burst one tenant: the first
+// burstCalls selections return only that tenant's tasks (up to limit),
+// later calls delegate. Others' backlogs persist, so long-window shares
+// recover while the burst window shows disproportionate concentration.
+type QuotaIgnoring struct {
+	inner port.TaskRepository
+	key   string
+	burst int
+	calls int
+}
+
+// IgnoreQuota wraps inner, bursting key for the first burstCalls selections.
+func IgnoreQuota(inner port.TaskRepository, key string, burstCalls int) *QuotaIgnoring {
+	return &QuotaIgnoring{inner: inner, key: key, burst: burstCalls}
+}
+
+func (q *QuotaIgnoring) FindAndLockDispatchable(ctx context.Context, limit, maxPerClient int) ([]*domain.Task, error) {
+	tasks, err := q.inner.FindAndLockDispatchable(ctx, limit, maxPerClient)
+	if err != nil {
+		return nil, err
+	}
+	q.calls++
+	if q.calls > q.burst {
+		return tasks, nil
+	}
+	kept := tasks[:0:0]
+	for _, t := range tasks {
+		if t.FairnessKey == q.key {
+			kept = append(kept, t)
+		}
+	}
+	return kept, nil
+}
+
+func (q *QuotaIgnoring) FindReceived(ctx context.Context, limit int) ([]*domain.Task, error) {
+	return q.inner.FindReceived(ctx, limit)
+}
+
+func (q *QuotaIgnoring) FindByID(ctx context.Context, id string) (*domain.Task, error) {
+	return q.inner.FindByID(ctx, id)
+}
+
+func (q *QuotaIgnoring) Save(ctx context.Context, t *domain.Task) error {
+	return q.inner.Save(ctx, t)
+}
+
+func (q *QuotaIgnoring) FindStarved(ctx context.Context, olderThan time.Duration, limit int) ([]*domain.Task, error) {
+	return q.inner.FindStarved(ctx, olderThan, limit)
+}
+
+func (q *QuotaIgnoring) FindTimedOut(ctx context.Context, olderThan time.Duration, limit int) ([]*domain.Task, error) {
+	return q.inner.FindTimedOut(ctx, olderThan, limit)
+}
+
+func (q *QuotaIgnoring) CountInFlight(ctx context.Context) (map[string]int, error) {
+	return q.inner.CountInFlight(ctx)
+}
+
+func (q *QuotaIgnoring) FindNextSequential(ctx context.Context, key string, seq int64) (*domain.Task, error) {
+	return q.inner.FindNextSequential(ctx, key, seq)
+}
+
+func (q *QuotaIgnoring) ListByKey(ctx context.Context, key string, status *domain.Status) ([]*domain.Task, error) {
+	return q.inner.ListByKey(ctx, key, status)
+}
+
+func (q *QuotaIgnoring) CountReceived(ctx context.Context) (int, error) {
+	return q.inner.CountReceived(ctx)
+}
+
+var _ port.TaskRepository = (*QuotaIgnoring)(nil)

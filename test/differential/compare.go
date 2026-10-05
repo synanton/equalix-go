@@ -39,6 +39,16 @@ type WindowResult struct {
 	Pass bool
 }
 
+// Gate names, defined once. Mismatch dimensions, fixture expectations,
+// and scope text all reference these — never hand-written strings, so a
+// rename cannot silently pass one fixture and fail another.
+const (
+	GateFairnessShares = "fairness-shares"
+	GateStarvation     = "starvation"
+	GateQuota          = "quota"
+	GateDispatchOrder  = "dispatch-order"
+)
+
 // Mismatch is the classification block (§7): which dimension diverged,
 // which gate the run was exercising vs which gate actually fired, the
 // specific tasks/windows of divergence, and both sides' evidence. Returned
@@ -111,9 +121,9 @@ func CompareShares(log RunLog, windowSize int, tolerance float64) ([]WindowResul
 	}
 	if len(bad) > 0 {
 		return out, &Mismatch{
-			Dimension:     "fairness-shares",
-			GateExercised: "fairness-shares",
-			GateFired:     "fairness-shares",
+			Dimension:     GateFairnessShares,
+			GateExercised: GateFairnessShares,
+			GateFired:     GateFairnessShares,
 			Windows:       bad,
 			Detail:        fmt.Sprintf("first bad window %d: %v", bad[0].Window, bad[0].Deviations),
 		}
@@ -205,7 +215,7 @@ func ComparePair(java, goLog RunLog, windowSize int, tolerance float64, gate str
 	}
 	if diff := OrderDivergence(java, goLog); diff != "" {
 		return &Mismatch{
-			Dimension: "dispatch-order", GateExercised: gate, GateFired: "dispatch-order",
+			Dimension: GateDispatchOrder, GateExercised: gate, GateFired: GateDispatchOrder,
 			JavaEvidence: summarize(java), GoEvidence: summarize(goLog), Detail: diff,
 		}
 	}
@@ -251,4 +261,94 @@ func summarize(log RunLog) string {
 		counts[r.Tenant]++
 	}
 	return fmt.Sprintf("dispatches=%d shares=%v", len(log.Order), counts)
+}
+
+// windowCounts groups dispatch counts per tenant into fixed windows.
+func windowCounts(order []DispatchRecord, size int) []map[string]int {
+	var out []map[string]int
+	for start := 0; start < len(order); start += size {
+		end := start + size
+		if end > len(order) {
+			end = len(order)
+		}
+		m := map[string]int{}
+		for _, r := range order[start:end] {
+			m[r.Tenant]++
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// CheckStarvation enforces the K-window rule (scope §5): no continuously
+// backlogged tenant goes more than maxZero consecutive windows with zero
+// dispatches. Windows here are small (default 100) — starvation is a
+// short-horizon shape that 1000-share-windows wash out, which is exactly
+// why it needs its own gate and window scale.
+// skipFirst drops a warmup prefix (startup transient) before windowing:
+// zero dispatches before tagging completes are not starvation.
+func CheckStarvation(log RunLog, windowSize, maxZero int, skipFirst int, gate string) *Mismatch {
+	order := log.Order
+	if skipFirst < len(order) {
+		order = order[skipFirst:]
+	}
+	windows := windowCounts(order, windowSize)
+	streak := map[string]int{}
+	for wi, counts := range windows {
+		for tenant := range log.Weights {
+			if counts[tenant] == 0 {
+				streak[tenant]++
+				if streak[tenant] > maxZero {
+					return &Mismatch{
+						Dimension: GateStarvation, GateExercised: gate, GateFired: GateStarvation,
+						Detail: fmt.Sprintf("tenant %s starved for %d consecutive %d-windows (first at window %d)",
+							tenant, streak[tenant], windowSize, wi-streak[tenant]+1),
+					}
+				}
+			} else {
+				streak[tenant] = 0
+			}
+		}
+	}
+	return nil
+}
+
+// CheckQuota bounds burst concentration (scope: quota gate): in no
+// short window may a tenant exceed its weight share by more than bound
+// tasks. Window scale (default 100) is an order below the fairness
+// windows so bursts show before they dilute; bound (default 5) is a
+// tunable heuristic for WFQ jitter at that scale, not a derived constant.
+// skipFirst drops a warmup prefix for the same reason (a fair
+// scheduler's first window can concentrate while tags settle).
+// Bound is over-only by design: under-representation is fairness's
+// jurisdiction (checked ±2 at 1000-scale), so suppression never fires
+// here — only concentration does. Default bound 10 at 100-scale: normal
+// WFQ jitter stays ~2-3, gap-absorbers peak ~8, catch-up density ~7,
+// egregious bursts clear 15+. Margins documented, tunable, not derived.
+func CheckQuota(log RunLog, windowSize int, bound float64, skipFirst int, gate string) *Mismatch {
+	var totalWeight float64
+	for _, w := range log.Weights {
+		totalWeight += w
+	}
+	order := log.Order
+	if skipFirst < len(order) {
+		order = order[skipFirst:]
+	}
+	for wi, counts := range windowCounts(order, windowSize) {
+		n := 0
+		for _, c := range counts {
+			n += c
+		}
+		for tenant, w := range log.Weights {
+			exp := float64(n) * w / totalWeight
+			if dev := float64(counts[tenant]) - exp; dev > bound {
+				return &Mismatch{
+					Dimension: GateQuota, GateExercised: gate, GateFired: GateQuota,
+					Detail: fmt.Sprintf("tenant %s has %d in 100-window %d, expected %.1f (bound +%.0f)",
+						tenant, counts[tenant], wi, exp, bound),
+				}
+			}
+		}
+	}
+	return nil
 }
