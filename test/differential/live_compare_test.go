@@ -287,7 +287,9 @@ func itoa(n int) string {
 // def on unset or unparseable values. Startup timeouts stay tunable per
 // runner without code changes: a cold CI runner gets a generous value in
 // the workflow, tightened later once baselines exist. A "service never
-// came up" failure with these knobs untouched means what it says.
+// came up" failure with these knobs untouched means what it says. No upper
+// bound is enforced here by design — the workflow's job-level timeout is
+// the outer backstop against a typo'd 5h value hanging CI.
 func envDuration(key string, def time.Duration) time.Duration {
 	if v := os.Getenv(key); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
