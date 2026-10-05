@@ -114,7 +114,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 					"SERVER_PORT":                "18083",
 				},
 				ReadyURL:       "http://127.0.0.1:18083/api/v1/status",
-				StartupTimeout: 120 * time.Second,
+				StartupTimeout: envDuration("EQUALIX_JAVA_STARTUP_TIMEOUT", 120*time.Second),
 			})
 		})
 
@@ -129,7 +129,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 			},
 			Env:            map[string]string{},
 			ReadyURL:       "http://127.0.0.1:18084/api/v1/status",
-			StartupTimeout: 60 * time.Second,
+			StartupTimeout: envDuration("EQUALIX_GO_STARTUP_TIMEOUT", 60*time.Second),
 		})
 	})
 
@@ -281,4 +281,18 @@ func sharesOf(r SideResult) map[string]int {
 
 func itoa(n int) string {
 	return strconv.Itoa(n)
+}
+
+// envDuration reads a Go duration from the environment, falling back to
+// def on unset or unparseable values. Startup timeouts stay tunable per
+// runner without code changes: a cold CI runner gets a generous value in
+// the workflow, tightened later once baselines exist. A "service never
+// came up" failure with these knobs untouched means what it says.
+func envDuration(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return def
 }
