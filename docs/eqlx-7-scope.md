@@ -16,21 +16,30 @@ pending and no home phase to put them in).
    workload: fixed-rate ingest tuned so p90 queue wait crosses
    `maxQueuedTime` (60s) while the lanes keep draining (exact rate
    determined empirically in the run PR; start near the observed
-   crossover and adjust once). Verdict: promotion counts recorded per
-   side, shares gated as usual. Closes the maturity table's
+   crossover and adjust once). Units, pinned: the file parameterizes
+   TOTAL rate across tenants (CORRECTION-3's ≈7/s is per-tenant — for
+   3 tenants the crossover file uses ≈21 total; the header states both
+   numbers so the tuning run cannot misread the target). Class: warm
+   (the deadline exercise needs operating RPS; a cold burst confounds
+   ramp with deadline). Verdict: promotion counts recorded per side, shares gated as usual. Closes the maturity table's
    starvation-promotion row as *characterized*. If the first tuning run
    avalanches or starves, record the shape and retune — the row wants
    one deliberate deadline exercise, not a specific outcome.
-2. **Idle-tenant credit workload.** A tenant idle for the first half,
-   active for the second: compare first-dispatch priority assignment
-   and V-seeding behavior for reactivated keys, Java vs Go.
-   Characterization only; any divergence is mechanism evidence for the
-   virtual-time NOTE family, never a gate.
-3. **CMS error curve.** Sketch estimate vs actual across key
-   cardinalities (conformance-level; no live pair needed — Java's CMS
-   params are known). Record relative error at 100/1k/10k/100k keys.
-   Closes the "CMS error characterization" residual as a curve, not a
-   bound.
+2. **Idle-tenant credit: parity check, not just characterization.** A
+   tenant idle for the first half, active for the second — run as a
+   JvG + GvG warm-class pair. The interesting property is shared: if
+   virtual-time credit accumulates during idle, a returning tenant
+   bursts unfairly, and both implementations must share the behavior
+   for parity to hold. Divergence here is mechanism evidence for the
+   virtual-time NOTE family with a parity interpretation (not a gate —
+   N=1 pair each, below the rate-criterion sample floor).
+3. **CMS error curve.** Sketch estimate vs actual with three pinned
+   knobs: cardinalities 100 / 1k / 10k / 100k; distributions uniform
+   AND zipfian (uniform overstates CMS accuracy for bursty real
+   workloads — at minimum one zipfian run); error metric = per-key
+   relative error distribution (p50/p99/max) plus mean absolute.
+   Conformance-level, no live pair needed (Java's CMS params are
+   known). Closes the residual as a curve, not a bound.
 4. **Java cold-startup cell: documented blocked, not scheduled.** Needs
    a genuinely fresh host (page-cache-cold JVM); that is an
    opportunity, not a task. Recorded in the runbook + maturity table as
@@ -44,15 +53,32 @@ pending and no home phase to put them in).
    v0.1.0 says "released, API unstable" honestly. Tag `v0.1.0` on the
    release commit; `-X main.version` picks it up in Docker builds
    (dev builds keep reporting `dev`).
-6. **Release docs:** `CHANGELOG.md` (phases EQLX-0–EQLX-7, one section
-   each, with the load-bearing decisions linked to spec §13 — not a
-   commit log retelling), `docs/architecture.md` (ports/adapters/jobs
-   map for the new reader), `docs/benchmarks.md` (publish the existing
-   bench numbers with hardware provenance). `docs/api.md`,
-   `docs/runbook.md` already exist — reviewed, not rewritten.
-7. **Freshness bump to "EQLX-7 complete"** as the release commit's
-   companion (standalone, per the rule — backward record, not folded
-   into release content).
+6. **Version source of truth: a committed VERSION file** (single line,
+   `0.1.0`). Rationale: git-describe derives from tree state (fails on
+   dirty builds, irreproducible in tarballs); Makefile-only stamping
+   breaks non-make builds. The file is explicit and greppable; the
+   forget-to-bump failure is closed by the release workflow, which
+   asserts tag == VERSION content and fails otherwise. Dockerfile
+   takes `ARG VERSION` (CI passes `$(cat VERSION)`); local builds
+   report `dev`.
+7. **What v0.1.0 ships: tag + GitHub release + GHCR image.** Release
+   notes are the CHANGELOG's v0.1.0 section verbatim. The image
+   (`ghcr.io/synanton/equalix-go:v0.1.0`) builds in a release workflow
+   (tag trigger, GITHUB_TOKEN registry auth) from the tagged tree with
+   the VERSION-derived stamp. No source tarball (the tag is the
+   tarball), no Docker Hub (one registry, not two).
+8. **CHANGELOG convention: Keep-a-Changelog** (Added / Changed /
+   Deprecated / Removed / Fixed / Security) per version section. This
+   is orthogonal to spec §13's DECISION/CORRECTION/NOTE taxonomy:
+   CHANGELOG records user-visible change, spec records design
+   rationale. The v0.2.0 cut follows the same shape.
+9. **Release docs:** `docs/architecture.md` (ports/adapters/jobs map
+   for the new reader), `docs/benchmarks.md` (existing bench numbers
+   with hardware provenance). `docs/api.md`, `docs/runbook.md`
+   already exist — reviewed, not rewritten.
+10. **Freshness bump to "EQLX-7 complete"** as the release commit's
+    companion (standalone, per the rule — backward record, not folded
+    into release content).
 
 ### Explicitly out (not this phase, not forgotten)
 
@@ -89,7 +115,7 @@ pending and no home phase to put them in).
 ## Sequence
 
 1. Promotion-deadline workload + run (needs the RPS-gate trickle; reuse warm machinery).
-2. Idle-tenant workload + run.
-3. CMS error curve (conformance, no live pair).
-4. Release docs + CHANGELOG + version tag.
+2. Idle-tenant workload + JvG/GvG warm-class pair.
+3. CMS error curve (uniform + zipfian, conformance, no live pair).
+4. Release docs + CHANGELOG + VERSION + tag + GHCR image.
 5. Freshness bump to EQLX-7 complete (standalone commit).
