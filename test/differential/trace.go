@@ -20,12 +20,23 @@ import (
 type Tracer struct {
 	mu     sync.Mutex
 	points map[string][]TracePoint
-	// firstErr records the first fetch error per side: a persistently
-	// failing sampler (all -1s) otherwise reads as "controller dead"
-	// with no indication whether it was auth, connect, decode, or status.
-	firstErr map[string]string
+	// fetchStat pins the /status fetch record per side. First-error-only
+	// proved insufficient: on sequential runs the first miss is always the
+	// pre-boot refused, which says nothing about mid-run misses (ctl-jg1:
+	// 57/57 Java misses — firstErr alone would still have read
+	// "connection refused" and closed the case wrongly). Failed counts
+	// every miss; Last names the most recent cause.
+	fetchStat map[string]*fetchStat
 	cancel context.CancelFunc
 	done   chan struct{}
+}
+
+// fetchStat is the per-side /status fetch record: miss count plus first
+// and most recent causes. Published in results.json beside the traces.
+type fetchStat struct {
+	Failed int    `json:"failed"`
+	First  string `json:"first,omitempty"`
+	Last   string `json:"last,omitempty"`
 }
 
 // StartTracer begins 5s sampling for each side until ctx ends or Stop is
@@ -33,7 +44,7 @@ type Tracer struct {
 // each side's database (uniform SQL, no API dependency).
 func StartTracer(ctx context.Context, sides map[string]Side, apiKey string) *Tracer {
 	ctx, cancel := context.WithCancel(ctx)
-	t := &Tracer{points: map[string][]TracePoint{}, firstErr: map[string]string{}, cancel: cancel, done: make(chan struct{})}
+	t := &Tracer{points: map[string][]TracePoint{}, fetchStat: map[string]*fetchStat{}, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(t.done)
 		t.sample(sides, apiKey)
@@ -67,9 +78,16 @@ func (t *Tracer) sample(sides map[string]Side, _ string) {
 			p.RPS = rps
 		} else {
 			t.mu.Lock()
-			if _, seen := t.firstErr[name]; !seen {
-				t.firstErr[name] = err.Error()
+			st := t.fetchStat[name]
+			if st == nil {
+				st = &fetchStat{}
+				t.fetchStat[name] = st
 			}
+			st.Failed++
+			if st.First == "" {
+				st.First = err.Error()
+			}
+			st.Last = err.Error()
 			t.mu.Unlock()
 		}
 		// RPS -1 = no reading (not zero — zero is a real throttle floor
@@ -128,20 +146,21 @@ func fetchCounts(s Side) (dispatched, promoted int) {
 	return dispatched, promoted
 }
 
-// FirstErrors returns the first /status fetch error per side ("" = none).
-// Logged by the live test so a persistently dark sampler names its cause.
-func (t *Tracer) FirstErrors() map[string]string {
+// FetchStats returns the per-side /status fetch record (miss count, first
+// and most recent causes). Logged by the live tests and persisted beside
+// the traces so a dark sampler names both its count and its causes.
+func (t *Tracer) FetchStats() map[string]fetchStat {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	out := make(map[string]string, len(t.firstErr))
-	for k, v := range t.firstErr {
-		out[k] = v
+	out := make(map[string]fetchStat, len(t.fetchStat))
+	for k, v := range t.fetchStat {
+		out[k] = *v
 	}
 	return out
 }
 
 // LiveStats summarizes the successful /status reads in pts: -1 is "no
-// reading" (service down, or fetch failed — see FirstErrors), never a
+// reading" (service down, or fetch failed — see FetchStats), never a
 // throttle value. Reporting first→last over raw endpoints misleads on
 // sequential runs — the second side's early -1s are pre-boot, the first
 // side's trailing -1s post-stop (ctl-jg2: both sides read "-1→live"

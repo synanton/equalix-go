@@ -267,7 +267,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 	}
 	method := "EQLX-5 real01: w2000 (200/400/1400, 1:2:7) fixed-100ms stub, as-fast-as-possible"
 	traces := tracer.Stop()
-	firstErr := tracer.FirstErrors()
+	fetch := tracer.FetchStats()
 	for side, pts := range traces {
 		if len(pts) > 0 {
 			live, first, last := LiveStats(pts)
@@ -276,11 +276,11 @@ func TestLiveJavaVsGo(t *testing.T) {
 				pts[len(pts)-1].Dispatched, pts[len(pts)-1].Promoted)
 		}
 	}
-	for side, err := range firstErr {
-		t.Logf("trace %s first status error: %s", side, err)
+	for side, st := range fetch {
+		t.Logf("trace %s status fetch: %d missed, first: %s, last: %s", side, st.Failed, st.First, st.Last)
 	}
 	if err := WriteResult(outDir, method,
-		resolved, shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), shaOr("EQUALIX_GO_SHA", "go-unrecorded"), calibration, traces, firstErr,
+		resolved, shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), shaOr("EQUALIX_GO_SHA", "go-unrecorded"), calibration, traces, fetch,
 		map[string]int{"java": java.Warmup, "go": goRes.Warmup}, mm); err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ func TestLiveGoVsGo(t *testing.T) {
 	}
 	method := "EQLX-5 control: go-vs-go (go1 in java_* slots) " + wl + " fixed-100ms stub, as-fast-as-possible"
 	traces := tracer.Stop()
-	firstErr := tracer.FirstErrors()
+	fetch := tracer.FetchStats()
 	for side, pts := range traces {
 		if len(pts) > 0 {
 			live, first, last := LiveStats(pts)
@@ -430,12 +430,12 @@ func TestLiveGoVsGo(t *testing.T) {
 				pts[len(pts)-1].Dispatched, pts[len(pts)-1].Promoted)
 		}
 	}
-	for side, err := range firstErr {
-		t.Logf("trace %s first status error: %s", side, err)
+	for side, st := range fetch {
+		t.Logf("trace %s status fetch: %d missed, first: %s, last: %s", side, st.Failed, st.First, st.Last)
 	}
 	goSHA := shaOr("EQUALIX_GO_SHA", "go-unrecorded")
 	if err := WriteResult(outDir, method,
-		resolved, goSHA, goSHA, calibration, traces, firstErr,
+		resolved, goSHA, goSHA, calibration, traces, fetch,
 		map[string]int{"go1": g1.Warmup, "go2": g2.Warmup}, mm); err != nil {
 		t.Fatal(err)
 	}

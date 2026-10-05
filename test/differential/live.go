@@ -267,11 +267,12 @@ type Result struct {
 	// possible after the fact.
 	Traces      map[string][]TracePoint `json:"traces,omitempty"`
 	Calibration []string                `json:"calibration"`
-	// FirstErrors pins the first /status fetch failure per side. A trace
-	// full of -1s without this names no cause (ctl-jg1 run1: 57/57 Java
-	// misses, cause unrecoverable post-hoc); with it the verdict reader
-	// sees connect-refused pre-boot vs 401 vs decode directly.
-	FirstErrors map[string]string `json:"first_errors,omitempty"`
+	// StatusFetch pins the per-side /status fetch record (miss count, first
+	// and most recent causes). A trace full of -1s without this names no
+	// cause (ctl-jg1 run1: 57/57 Java misses, cause unrecoverable post-hoc);
+	// with it the verdict reader sees pre-boot refused vs mid-run 401 vs
+	// decode directly, with counts.
+	StatusFetch map[string]fetchStat `json:"status_fetch,omitempty"`
 	// Warmup records the quiescence-prefix length per side: ordering
 	// diagnostics without it cannot separate transient from steady state.
 	Warmup map[string]int `json:"warmup,omitempty"`
@@ -282,11 +283,11 @@ type Result struct {
 // WriteResult publishes results.json plus methodology.md into dir: dual
 // SHAs attribute the build, resolved config attributes the run, traces
 // attribute timing (empty map when tracing was disabled).
-func WriteResult(dir, methodology string, resolved *Resolved, javaSHA, goSHA string, calibration []string, traces map[string][]TracePoint, firstErr map[string]string, warmup map[string]int, mm *Mismatch) error {
+func WriteResult(dir, methodology string, resolved *Resolved, javaSHA, goSHA string, calibration []string, traces map[string][]TracePoint, fetch map[string]fetchStat, warmup map[string]int, mm *Mismatch) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	res := Result{Resolved: *resolved, Method: methodology, Traces: traces, Calibration: calibration, FirstErrors: firstErr, Warmup: warmup, Pass: mm == nil, Mismatch: mm}
+	res := Result{Resolved: *resolved, Method: methodology, Traces: traces, Calibration: calibration, StatusFetch: fetch, Warmup: warmup, Pass: mm == nil, Mismatch: mm}
 	raw, err := json.MarshalIndent(res, "", "  ")
 	if err != nil {
 		return err
