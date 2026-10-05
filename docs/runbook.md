@@ -114,9 +114,27 @@ Wire names canonical per spec §13 (sole source:
 > "Idle observed" column is what was measured; the "Loaded guidance"
 > column is order-of-magnitude orientation until snapshots arrive.
 > Loaded typicals accumulate in the nightly CI artifacts
-> (`differential-results-<run>-<sha>/results-jvg|gvg/metrics/*.txt`,
+> (`differential-results-<run>-<sha>/results-jvg|gvg/snapshots/*.txt`,
 > 90-day retention) — cite a snapshot, not this table, for loaded
-> numbers.
+> numbers. Filenames are seconds since the leg's snapshot-loop start
+> (t=0 ≈ step start, before either service spawns — NOT first-ingest).
+> `t0.txt` beside them pins the loop-start wall clock; translate as
+> absolute = t0 + offset, workload-event offset = absolute −
+> `results.json` `resolved.marker_{java,go}`. Both T0
+> (`startup.spawn`) and the markers are persisted, so the translation
+> needs nothing outside the artifacts. One loop clock per leg keeps
+> cross-side comparison aligned; legs translate independently.
+> `skips.log` beside them records every non-200 scrape
+> with cause — a leg with snapshots but a non-empty skips.log had a
+> struggling scrape target, not a quiet one.
+>
+> Java's `/actuator/prometheus` includes JVM-level metrics (heap, GC,
+> threads, class loading) with no Go counterpart. Only
+> scheduler-domain metrics (dispatch latency, timeout detection, RPS,
+> drift) are cross-comparable; runtime metrics are
+> implementation-specific and reviewed separately — a snapshots diff
+> that shows JVM series with no Go equivalent is expected asymmetry,
+> not missing observability.
 
 | Series | Type | Idle observed | Loaded guidance |
 |---|---|---|---|

@@ -127,15 +127,38 @@ jobs:
         run: |
           # /metrics snapshots feed the runbook's loaded typicals (the
           # typicals the harness traces cannot supply — histograms live
-          # in the exporters, not results.json). curl fails silently
-          # pre-boot (|| true); files land only on HTTP 200 so empty
-          # pre-boot attempts leave no artifacts; the loop dies with the
-          # step either way. Java serves actuator, not /metrics.
-          mkdir -p ${{ github.workspace }}/results-jvg/metrics
-          (while true; do
-            ts=$(date +%s)
-            body=$(curl -sf http://127.0.0.1:18083/actuator/prometheus) && [ -n "$body" ] && echo "$body" > ${{ github.workspace }}/results-jvg/metrics/java-$ts.txt || true
-            body=$(curl -sf http://127.0.0.1:18084/metrics) && [ -n "$body" ] && echo "$body" > ${{ github.workspace }}/results-jvg/metrics/go-$ts.txt || true
+          # in the exporters, not results.json). Filenames are seconds
+          # since the loop started (offsets, not wall-clock — same
+          # discipline as the workload's created_at_offset_ms, so spikes
+          # correlate with run events without cross-host clock alignment).
+          # Skips log to skips.log with cause: a missing snapshot is a
+          # scrape-target signal (auth, path, crashed exporter), never
+          # just "no data" — write-on-200-only without the log would make
+          # a broken scrape target indistinguishable from a quiet one.
+          # Java serves actuator, not /metrics.
+          # t=0 is the loop start below (≈ step start, before either
+          # service spawns — NOT first-ingest, which is unknowable this
+          # early). t0.txt pins the wall-clock so offsets translate:
+          # absolute = t0 + offset; workload-event offset = absolute −
+          # results.json resolved.marker_{java,go}. Both T0
+          # (startup.spawn) and the markers are persisted, so the
+          # translation is recoverable from artifacts alone. One loop
+          # clock per leg, so cross-side comparison within a leg is
+          # aligned; legs have independent t0 files.
+          mkdir -p ${{ github.workspace }}/results-jvg/snapshots
+          (t0=$(date +%s); date -u +%FT%TZ > ${{ github.workspace }}/results-jvg/snapshots/t0.txt
+          snap() { # $1=url $2=outfile: write on 200, log the skip otherwise
+            body=$(curl -sf "$1" || true)
+            if [ -n "$body" ]; then
+              echo "$body" > "$2"
+            else
+              echo "$(date -u +%FT%TZ) skip $1 (non-200 or empty)" >> ${{ github.workspace }}/results-jvg/snapshots/skips.log
+            fi
+          }
+          while true; do
+            off=$(( $(date +%s) - t0 ))
+            snap http://127.0.0.1:18083/actuator/prometheus ${{ github.workspace }}/results-jvg/snapshots/java-${off}s.txt
+            snap http://127.0.0.1:18084/metrics ${{ github.workspace }}/results-jvg/snapshots/go-${off}s.txt
             sleep 30
           done) &
           SNAP=$!
@@ -157,11 +180,20 @@ jobs:
           EQUALIX_GO_SHA: ${{ github.sha }}
           EQUALIX_GO_STARTUP_TIMEOUT: 2m
         run: |
-          mkdir -p ${{ github.workspace }}/results-gvg/metrics
-          (while true; do
-            ts=$(date +%s)
-            body=$(curl -sf http://127.0.0.1:18085/metrics) && [ -n "$body" ] && echo "$body" > ${{ github.workspace }}/results-gvg/metrics/go1-$ts.txt || true
-            body=$(curl -sf http://127.0.0.1:18086/metrics) && [ -n "$body" ] && echo "$body" > ${{ github.workspace }}/results-gvg/metrics/go2-$ts.txt || true
+          mkdir -p ${{ github.workspace }}/results-gvg/snapshots
+          (t0=$(date +%s); date -u +%FT%TZ > ${{ github.workspace }}/results-gvg/snapshots/t0.txt
+          snap() {
+            body=$(curl -sf "$1" || true)
+            if [ -n "$body" ]; then
+              echo "$body" > "$2"
+            else
+              echo "$(date -u +%FT%TZ) skip $1 (non-200 or empty)" >> ${{ github.workspace }}/results-gvg/snapshots/skips.log
+            fi
+          }
+          while true; do
+            off=$(( $(date +%s) - t0 ))
+            snap http://127.0.0.1:18085/metrics ${{ github.workspace }}/results-gvg/snapshots/go1-${off}s.txt
+            snap http://127.0.0.1:18086/metrics ${{ github.workspace }}/results-gvg/snapshots/go2-${off}s.txt
             sleep 30
           done) &
           SNAP=$!
