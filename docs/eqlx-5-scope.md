@@ -201,6 +201,19 @@ Row 13 is evidence-only per the match criterion above.
     a single-tenant burst dispatches disproportionately. Correct averages
     over long windows, wrong inside the burst. Confirms the fairness gate
     is window-sensitive (fails short windows, passes long ones).
+- **Isolation mechanism (pinned): compensation within one window +
+  asymmetric quota bound.** A burst that breaks a 100-window necessarily
+  perturbs its enclosing 1000-window, so strict isolation needs
+  construction, not luck: each fixture keeps per-1000-window totals exact
+  (fairness passes) while confining the anomaly to 100-scale shape —
+  starvation via zero-dispatch gap with catch-up spread evenly in-window,
+  quota via front-loaded burst with light-but-nonzero remainder. The quota
+  bound is over-only (+10 at 100-scale): suppression is fairness's
+  jurisdiction (±2 at 1000-scale), so catch-up never fires it. Gate
+  scales: fairness 1000/±2, starvation 100-windows/K=3 consecutive zeros,
+  quota 100-windows/+10. Each fixture asserts its own gate fires, the
+  other two pass, and `RequireGate` fails the fixture loudly if run below
+  one full window — fixtures cannot be configured into vacuity.
 
 ### 7. Output format — methodology, not target numbers
 
