@@ -1,6 +1,8 @@
 # Equalix Go service — multi-stage, static binary on distroless.
 #
-# Build: docker build --build-arg VERSION=$(git rev-parse --short HEAD) .
+# Build: docker build --build-arg VERSION=$(cat VERSION) .
+# (VERSION file is the source of truth — never git-describe here; a
+# dirty tree or a tarball build would stamp irreproducibly.)
 # Run (env-only, no config file):
 #   docker run --rm -p 8080:8080 \
 #     -e EQUALIX_DSN='postgres://cmp:x@host:5432/equalix_go?sslmode=disable' \
