@@ -211,25 +211,38 @@ func fetchPrioritiesSvc(ctx context.Context, client *http.Client, svc SideConfig
 	return out
 }
 
+// TracePoint is one 5s sample of scheduler state during a live run.
+// Three series per side (RPS, cumulative dispatched, cumulative promoted)
+// attribute divergence to ramp timing vs scheduling: if RPS trajectories
+// match and shares still diverge, the residual is a real difference.
+type TracePoint struct {
+	At         time.Time `json:"at"`
+	RPS        float64   `json:"rps"`
+	Dispatched int       `json:"dispatched"`
+	Promoted   int       `json:"promoted"`
+}
+
 // Result is the published artifact for one comparison.
 type Result struct {
 	Resolved Resolved `json:"resolved"`
 	Method   string   `json:"methodology"`
-	// Calibration names the pre-flight fixtures that fired before the
-	// comparison ran (FirstQueued, InvertedWeights, Starving, Quota).
-	// A result without calibration evidence is pipeline output, not a verdict.
-	Calibration []string  `json:"calibration"`
-	Pass        bool      `json:"pass"`
-	Mismatch    *Mismatch `json:"mismatch,omitempty"`
+	// Traces holds per-side sample series keyed by side name. Empty when
+	// tracing was disabled; presence is what makes timing-attribution
+	// possible after the fact.
+	Traces      map[string][]TracePoint `json:"traces,omitempty"`
+	Calibration []string                `json:"calibration"`
+	Pass        bool                    `json:"pass"`
+	Mismatch    *Mismatch               `json:"mismatch,omitempty"`
 }
 
 // WriteResult publishes results.json plus methodology.md into dir: dual
-// SHAs attribute the build, resolved config attributes the run.
-func WriteResult(dir, methodology string, resolved *Resolved, javaSHA, goSHA string, calibration []string, mm *Mismatch) error {
+// SHAs attribute the build, resolved config attributes the run, traces
+// attribute timing (empty map when tracing was disabled).
+func WriteResult(dir, methodology string, resolved *Resolved, javaSHA, goSHA string, calibration []string, traces map[string][]TracePoint, mm *Mismatch) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	res := Result{Resolved: *resolved, Method: methodology, Calibration: calibration, Pass: mm == nil, Mismatch: mm}
+	res := Result{Resolved: *resolved, Method: methodology, Traces: traces, Calibration: calibration, Pass: mm == nil, Mismatch: mm}
 	raw, err := json.MarshalIndent(res, "", "  ")
 	if err != nil {
 		return err

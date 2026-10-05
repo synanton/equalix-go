@@ -151,6 +151,13 @@ func TestLiveJavaVsGo(t *testing.T) {
 		return res
 	}
 
+	javaDSN := jdbcToPgx(env["EQUALIX_JAVA_JDBC"], env["EQUALIX_PG_USER"], env["EQUALIX_PG_PASSWORD"])
+	goDSN := env["EQUALIX_GO_DSN"]
+	tracer := StartTracer(ctx, map[string]Side{
+		"java": {Name: "java", BaseURL: "http://127.0.0.1:18083", DSN: javaDSN, APIKey: apiKey},
+		"go":   {Name: "go", BaseURL: "http://127.0.0.1:18084", DSN: goDSN, APIKey: apiKey},
+	}, apiKey)
+
 	java := runOne("java", "http://127.0.0.1:18083", 18093,
 		jdbcToPgx(env["EQUALIX_JAVA_JDBC"], env["EQUALIX_PG_USER"], env["EQUALIX_PG_PASSWORD"]),
 		func() (*Proc, error) {
@@ -249,8 +256,16 @@ func TestLiveJavaVsGo(t *testing.T) {
 		MarkerJava: java.Marker, MarkerGo: goRes.Marker,
 	}
 	method := "EQLX-5 real01: w2000 (200/400/1400, 1:2:7) fixed-100ms stub, as-fast-as-possible"
+	traces := tracer.Stop()
+	for side, pts := range traces {
+		if len(pts) > 0 {
+			t.Logf("trace %s: %d samples, rps %.1f→%.1f, dispatched %d, promoted %d",
+				side, len(pts), pts[0].RPS, pts[len(pts)-1].RPS,
+				pts[len(pts)-1].Dispatched, pts[len(pts)-1].Promoted)
+		}
+	}
 	if err := WriteResult(outDir, method,
-		resolved, shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), shaOr("EQUALIX_GO_SHA", "go-unrecorded"), calibration, mm); err != nil {
+		resolved, shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), shaOr("EQUALIX_GO_SHA", "go-unrecorded"), calibration, traces, mm); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("java shares: %s", summarize(java.Log))
