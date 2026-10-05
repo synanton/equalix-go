@@ -99,6 +99,11 @@ jobs:
           EQUALIX_RESULTS_DIR: ${{ github.workspace }}/results
           EQUALIX_JAVA_SHA: ${{ inputs.java_sha }}
           EQUALIX_GO_SHA: ${{ github.sha }}
+          # Generous startup on cold runners (Maven + Spring boot from
+          # scratch); tighten once baselines exist. A genuinely broken
+          # service still fails loudly naming the side.
+          EQUALIX_JAVA_STARTUP_TIMEOUT: 5m
+          EQUALIX_GO_STARTUP_TIMEOUT: 2m
         run: |
           go test -count=1 -tags=differential -run 'TestLiveJavaVsGo|TestLiveGoVsGo' \
             ./test/differential/... 2>&1 | tee compare.log; test ${PIPESTATUS[0]} -eq 0
