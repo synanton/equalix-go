@@ -8,6 +8,8 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.33.0
 )
 
+require gopkg.in/yaml.v3 v3.0.1 // indirect
+
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect

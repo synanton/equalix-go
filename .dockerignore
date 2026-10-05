@@ -1,0 +1,11 @@
+# Keep the build context to source + module files. Everything else is
+# either derived (binaries, results, logs) or operator-local (env files).
+.git
+*.log
+/tmp/
+/results*
+test/differential/results*
+*.md
+.env
+.env.*
+.github/
