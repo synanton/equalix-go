@@ -97,45 +97,65 @@ func RunWarmup(ctx context.Context, client *http.Client, svc SideConfig, apiKey 
 	if interval <= 0 {
 		interval = time.Second
 	}
+	// One unified loop: submit paced, poll RPS ~1/s, stop once the floor
+	// holds past a minimum pre-phase (100 tasks). The gate must run DURING
+	// submission, not after: evaluations fire on completions, so a drained
+	// backlog freezes RPS wherever it stands and a post-drain gate can
+	// never trip (observed: burst-then-gate stalled Java at 2.2).
+	const minWarmTasks = 100
+	maxTasks := cfg.Tasks * 3
+	if maxTasks < minWarmTasks {
+		maxTasks = minWarmTasks
+	}
+	pollEvery := int(cfg.PacePerSec)
+	if pollEvery < 1 {
+		pollEvery = 1
+	}
+	side := Side{Name: svc.Name, BaseURL: svc.BaseURL, APIKey: apiKey}
+	deadline := time.Now().Add(cfg.Timeout)
 	svcIDs := map[string]string{}
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
-	for i := 0; i < cfg.Tasks; i++ {
+	submitted := 0
+	for {
 		select {
 		case <-ctx.Done():
 			return 0, ctx.Err()
 		case <-tick.C:
 		}
-		tenant := tenants[i%len(tenants)]
-		wt := Task{ID: fmt.Sprintf("warm-%s-%d", svc.Name, i), Tenant: tenant, Weight: weights[tenant]}
+		tenant := tenants[submitted%len(tenants)]
+		wt := Task{ID: fmt.Sprintf("warm-%s-%d", svc.Name, submitted), Tenant: tenant, Weight: weights[tenant]}
 		_, svcID, err := SubmitTask(ctx, client, svc.BaseURL, apiKey, wt, time.Now())
 		if err != nil {
 			return 0, err
 		}
 		svcIDs[wt.ID] = svcID
-	}
-	// RPS gate: the controller must report at/above floor before the
-	// measurement starts. fetchRPS errors here are loud (unlike the
-	// tracer, which tolerates a downed service): a warm-up that cannot
-	// read RPS cannot claim to be warm.
-	side := Side{Name: svc.Name, BaseURL: svc.BaseURL, APIKey: apiKey}
-	deadline := time.Now().Add(cfg.Timeout)
-	for {
+		submitted++
+		if submitted%pollEvery != 0 && submitted < maxTasks {
+			continue
+		}
 		rps, err := fetchRPS(side)
 		if err != nil {
 			return 0, err
 		}
-		if rps >= cfg.RPS {
+		if submitted >= minWarmTasks && rps >= cfg.RPS {
+			break
+		}
+		if submitted >= maxTasks {
 			break
 		}
 		if time.Now().After(deadline) {
 			return 0, fmt.Errorf("differential: side %s warmup RPS %.1f < floor %.0f in %v", svc.Name, rps, cfg.RPS, cfg.Timeout)
 		}
-		select {
-		case <-ctx.Done():
-			return 0, ctx.Err()
-		case <-time.After(time.Second):
-		}
+	}
+	// RPS gate: the controller must report at/above floor before the
+	// measurement starts. fetchRPS errors here are loud (unlike the
+	// tracer, which tolerates a downed service): a warm-up that cannot
+	// read RPS cannot claim to be warm.
+	if rps, err := fetchRPS(side); err != nil {
+		return 0, err
+	} else if rps < cfg.RPS {
+		return 0, fmt.Errorf("differential: side %s warmup RPS %.1f < floor %.0f after %d tasks", svc.Name, rps, cfg.RPS, submitted)
 	}
 	drain, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
