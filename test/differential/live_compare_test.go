@@ -118,14 +118,9 @@ func TestLiveJavaVsGo(t *testing.T) {
 	ctx := context.Background()
 	calibration := runCalibration(t)
 
-	// Fresh state per run: residue shares keys and persists V, so repeated
-	// runs without reset would measure history, not the workload.
-	javaPGDSN := jdbcToPgx(env["EQUALIX_JAVA_JDBC"], env["EQUALIX_PG_USER"], env["EQUALIX_PG_PASSWORD"])
-	for _, dsn := range []string{javaPGDSN, env["EQUALIX_GO_DSN"]} {
-		if err := ResetDB(ctx, dsn); err != nil {
-			t.Fatalf("reset: %v", err)
-		}
-	}
+	// Fresh state per run is established inside runOne after boot (tables
+	// exist only post-migration); residue shares keys and persists V, so
+	// repeated runs without reset would measure history, not the workload.
 
 	wl := os.Getenv("EQUALIX_WORKLOAD")
 	if wl == "" {
@@ -152,6 +147,13 @@ func TestLiveJavaVsGo(t *testing.T) {
 			t.Fatalf("side %s: %v", name, err)
 		}
 		defer proc.Stop()
+		// Reset AFTER boot: tables exist only post-migration (Flyway on
+		// Java boot, manual apply on Go). Resetting before launch would
+		// fail on missing relations; resetting here guarantees identical
+		// fresh state per run regardless of prior runs.
+		if err := ResetDB(ctx, dsn); err != nil {
+			t.Fatalf("side %s reset: %v", name, err)
+		}
 		svc := SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, HTTPPort: 0, APIKey: apiKey}
 		res, err := RunSide(ctx, svc, apiKey, workload, stub, 180*time.Second)
 		if err != nil {
@@ -310,11 +312,8 @@ func TestLiveGoVsGo(t *testing.T) {
 	if goDSN == "" {
 		t.Skip("EQUALIX_GO_DSN not set")
 	}
-	for _, dsn := range []string{goDSN, dsn2} {
-		if err := ResetDB(ctx, dsn); err != nil {
-			t.Fatalf("reset: %v", err)
-		}
-	}
+	// No pre-launch reset here: the GoVsGo sides reset inside runGo after
+	// boot (same reason as above — tables exist only post-migration).
 	runGo := func(name, svcURL string, svcPort, stubPort int, dsn string) SideResult {
 		stub, err := NewStub(StubConfig{
 			Port: stubPort, Latency: DefaultLatency(),
@@ -341,6 +340,9 @@ func TestLiveGoVsGo(t *testing.T) {
 			t.Fatalf("side %s: %v", name, err)
 		}
 		defer proc.Stop()
+		if err := ResetDB(ctx, dsn); err != nil {
+			t.Fatalf("side %s reset: %v", name, err)
+		}
 		svc := SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, HTTPPort: svcPort, APIKey: apiKey}
 		res, err := RunSide(ctx, svc, apiKey, workload, stub, 180*time.Second)
 		if err != nil {
