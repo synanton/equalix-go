@@ -5,6 +5,7 @@ package differential
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -57,8 +58,12 @@ type Side struct {
 func (t *Tracer) sample(sides map[string]Side, _ string) {
 	now := time.Now()
 	for name, s := range sides {
-		p := TracePoint{At: now}
-		p.RPS = fetchRPS(s)
+		p := TracePoint{At: now, RPS: -1}
+		if rps, err := fetchRPS(s); err == nil {
+			p.RPS = rps
+		}
+		// RPS -1 = no reading (not zero — zero is a real throttle floor
+		// value and must never be confused with a missed sample).
 		p.Dispatched, p.Promoted = fetchCounts(s)
 		t.mu.Lock()
 		t.points[name] = append(t.points[name], p)
@@ -66,34 +71,38 @@ func (t *Tracer) sample(sides map[string]Side, _ string) {
 	}
 }
 
-func fetchRPS(s Side) float64 {
+func fetchRPS(s Side) (float64, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	req, err := http.NewRequest("GET", s.BaseURL+"/api/v1/status", nil)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("differential: side %s status request: %w", s.Name, err)
 	}
 	// Both schedulers gate /status behind X-API-Key; without it Java
 	// answers 401 with an empty body, which decodes to a silent 0.0 —
 	// a missing-auth bug that reads exactly like "RPS flatlined at zero".
 	req.Header.Set("X-API-Key", s.APIKey)
-	req.Header.Set("X-API-Key", s.APIKey)
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("differential: side %s status: %w", s.Name, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("differential: side %s status: HTTP %d", s.Name, resp.StatusCode)
+	}
 	var body struct {
 		CurrentRPS *float64 `json:"currentRps"`
 		RPS        *float64 `json:"rps"`
 	}
-	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return 0, fmt.Errorf("differential: side %s status decode: %w", s.Name, err)
+	}
 	if body.CurrentRPS != nil {
-		return *body.CurrentRPS
+		return *body.CurrentRPS, nil
 	}
 	if body.RPS != nil {
-		return *body.RPS
+		return *body.RPS, nil
 	}
-	return 0
+	return 0, fmt.Errorf("differential: side %s status: no RPS field", s.Name)
 }
 
 func fetchCounts(s Side) (dispatched, promoted int) {

@@ -118,6 +118,15 @@ func TestLiveJavaVsGo(t *testing.T) {
 	ctx := context.Background()
 	calibration := runCalibration(t)
 
+	// Fresh state per run: residue shares keys and persists V, so repeated
+	// runs without reset would measure history, not the workload.
+	javaPGDSN := jdbcToPgx(env["EQUALIX_JAVA_JDBC"], env["EQUALIX_PG_USER"], env["EQUALIX_PG_PASSWORD"])
+	for _, dsn := range []string{javaPGDSN, env["EQUALIX_GO_DSN"]} {
+		if err := ResetDB(ctx, dsn); err != nil {
+			t.Fatalf("reset: %v", err)
+		}
+	}
+
 	wl := os.Getenv("EQUALIX_WORKLOAD")
 	if wl == "" {
 		wl = "w127.jsonl"
@@ -158,8 +167,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 		"go":   {Name: "go", BaseURL: "http://127.0.0.1:18084", DSN: goDSN, APIKey: apiKey},
 	}, apiKey)
 
-	java := runOne("java", "http://127.0.0.1:18083", 18093,
-		jdbcToPgx(env["EQUALIX_JAVA_JDBC"], env["EQUALIX_PG_USER"], env["EQUALIX_PG_PASSWORD"]),
+	java := runOne("java", "http://127.0.0.1:18083", 18093, javaDSN,
 		func() (*Proc, error) {
 			return Launch(ctx, ProcSpec{
 				Name: "java", Bin: "java",
@@ -297,6 +305,15 @@ func TestLiveGoVsGo(t *testing.T) {
 	dsn2 := os.Getenv("EQUALIX_GO_DSN2")
 	if dsn2 == "" {
 		t.Skip("EQUALIX_GO_DSN2 not set")
+	}
+	goDSN := os.Getenv("EQUALIX_GO_DSN")
+	if goDSN == "" {
+		t.Skip("EQUALIX_GO_DSN not set")
+	}
+	for _, dsn := range []string{goDSN, dsn2} {
+		if err := ResetDB(ctx, dsn); err != nil {
+			t.Fatalf("reset: %v", err)
+		}
 	}
 	runGo := func(name, svcURL string, svcPort, stubPort int, dsn string) SideResult {
 		stub, err := NewStub(StubConfig{

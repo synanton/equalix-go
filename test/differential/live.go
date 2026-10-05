@@ -138,10 +138,14 @@ func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task
 		order = append(order, DispatchRecord{Seq: seq, TaskID: wid, Tenant: tenant})
 		seq++
 	}
-	// Priorities: best-effort read-back per task (feeds tie groups; absent
-	// priorities degrade tie detection toward "everything ties", which can
-	// only suppress ordering verdicts, never invent them).
-	priorities := fetchPrioritiesSvc(ctx, client, svc, apiKey, svcIDs)
+	// Priorities: read back per task (feeds tie groups; absent priorities
+	// degrade tie detection toward "everything ties", which can only
+	// suppress ordering verdicts, never invent them — but a read failure
+	// is still loud, not a default, per the harness no-silent-default rule.
+	priorities, err := fetchPrioritiesSvc(ctx, client, svc, apiKey, svcIDs)
+	if err != nil {
+		return out, err
+	}
 	for i := range order {
 		order[i].Priority = priorities[order[i].TaskID]
 	}
@@ -187,28 +191,60 @@ func fetchStatus(ctx context.Context, client *http.Client, svc SideConfig, apiKe
 	return body.Status, nil
 }
 
-func fetchPrioritiesSvc(ctx context.Context, client *http.Client, svc SideConfig, apiKey string, svcIDs map[string]string) map[string]int64 {
+func fetchPrioritiesSvc(ctx context.Context, client *http.Client, svc SideConfig, apiKey string, svcIDs map[string]string) (map[string]int64, error) {
 	out := map[string]int64{}
 	for wid, id := range svcIDs {
 		req, err := http.NewRequestWithContext(ctx, "GET", svc.BaseURL+"/api/v1/tasks/"+id, nil)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("differential: side %s priority request %s: %w", svc.Name, id, err)
 		}
 		req.Header.Set("X-API-Key", apiKey)
 		resp, err := client.Do(req)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("differential: side %s priority %s: %w", svc.Name, id, err)
 		}
 		var body struct {
 			Priority *int64 `json:"priority"`
 		}
-		_ = json.NewDecoder(resp.Body).Decode(&body)
+		derr := json.NewDecoder(resp.Body).Decode(&body)
 		resp.Body.Close()
+		// Non-2xx and decode failures are loud, never defaults: missing
+		// priorities inflate every task into one giant tie group, which
+		// neuters ordering diagnostics silently. Same class as the RPS
+		// 401-to-zero bug — plausible-looking defaults instead of errors.
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("differential: side %s priority %s: HTTP %d", svc.Name, id, resp.StatusCode)
+		}
+		if derr != nil {
+			return nil, fmt.Errorf("differential: side %s priority %s decode: %w", svc.Name, id, derr)
+		}
 		if body.Priority != nil {
 			out[wid] = *body.Priority
 		}
 	}
-	return out
+	return out, nil
+}
+
+// ResetDB truncates scheduler tables and zeroes system virtual time so
+// repeated runs start from identical state. Residue from a prior run would
+// otherwise pollute shares (same keys) and tagging (persisted V) —
+// repeated runs would measure history, not the workload. Test-only by
+// construction: it takes a DSN, never a repository.
+func ResetDB(ctx context.Context, dsn string) error {
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("differential: reset connect: %w", err)
+	}
+	defer conn.Close(ctx)
+	_, err = conn.Exec(ctx, `TRUNCATE tasks, client_counts, client_sequence_state, client_virtual_time`)
+	if err != nil {
+		return fmt.Errorf("differential: reset truncate: %w", err)
+	}
+	_, err = conn.Exec(ctx, `UPDATE scheduler_virtual_clock SET virtual_time = 0`)
+	if err != nil {
+		return fmt.Errorf("differential: reset clock: %w", err)
+	}
+	return nil
 }
 
 // TracePoint is one 5s sample of scheduler state during a live run.
