@@ -47,6 +47,11 @@ jobs:
       EQUALIX_WARMUP_TASKS: ${{ github.event.inputs.warmup_tasks || '500' }}
       EQUALIX_WARMUP_RPS: ${{ github.event.inputs.warmup_rps || '15' }}
       EQUALIX_WARMUP_PACE: "8"
+      # Nightly runs the gate workload (w2000: 2 full windows, shares gate
+      # fires); manual dispatch defaults to w127 (fast, pipeline-only).
+      # Measured warm legs run ~6 min each — total ~25 min against the
+      # 60-min budget, so no timeout bump unless cold-runner builds slip.
+      EQUALIX_WORKLOAD: ${{ github.event_name == 'schedule' && 'w2000.jsonl' || github.event.inputs.workload || 'w127.jsonl' }}
     steps:
       - uses: actions/checkout@v4
         with:
