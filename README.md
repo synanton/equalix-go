@@ -20,15 +20,16 @@ This is **not a language port**. The Java code is the behavioral reference; the 
 
 | Area | Implemented | Unit/integration tested | Conformance-validated | Benchmark-validated | Differentially validated vs Java |
 |---|---|---|---|---|---|
-| Domain core (virtual time, priority, CMS, selection) | ✅ | ✅ | ✅ (1:2:7 + seeded) | ✅ (hot-path benches) | 🔶 smoke01 (21 tasks, shares exact; ordering diagnostic) |
-| Postgres adapter | ✅ | ✅ (testcontainers) | ⬜ | ⬜ | 🔶 smoke01 (same run) |
-| HTTP surface | ✅ | ✅ (contract tests) | ⬜ | ⬜ | 🔶 smoke01 (same run) |
-| Jobs (dispatcher, calculator, watchdog, timeout) | ✅ | ✅ | ⬜ | ⬜ | 🔶 smoke01 (same run) |
+| Domain core (virtual time, priority, CMS, selection) | ✅ | ✅ | ✅ (1:2:7 + seeded) | ✅ (hot-path benches) | ✅ warm-class w2000 (JvG 5/5, GvG 5/5 shares; cold 3/5 characterization) |
+| Postgres adapter | ✅ | ✅ (testcontainers) | ⬜ | ⬜ | ✅ warm-class (same runs) |
+| HTTP surface | ✅ | ✅ (contract tests) | ⬜ | ⬜ | ✅ warm-class (same runs) |
+| Jobs (dispatcher, calculator, watchdog, timeout) | ✅ | ✅ | ⬜ | ⬜ | ✅ warm-class (same runs) |
 | Jobs (recovery) | — (no such service; CORRECTION-2) | — | — | — | — |
 
 `⬜` = not yet; nothing in this table is claimed before its evidence exists.
 `🔶` = ran and produced a comparison (smoke-scale); ✅ requires meaningful
-workloads with real fairness measurement (EQLX-5 gate).
+workloads with real fairness measurement (EQLX-5 gate: warm-class w2000,
+JvG 0/5 fails vs GvG 0/5 fails, within one-run slack).
 
 #### Differential dimensions (gate-level)
 
@@ -38,10 +39,10 @@ has. Starvation splits in two:
 
 | Gate | Oracle counterpart | Differential status |
 |---|---|---|
-| Fairness shares (§4 bound) | Java weighted shares | 🔶 smoke01 |
-| Dispatch order (diagnostic) | Java dispatch sequence | 🔶 smoke01 (evidence only, never gates) |
+| Fairness shares (§4 bound) | Java weighted shares | ✅ warm-class (JvG 5/5, GvG 5/5; cold 3/5 JvG characterization) |
+| Dispatch order (diagnostic) | Java dispatch sequence | 🔶 evidence only, never gates (diverges every run on both pairs, including GvG) |
 | Quota bound | Java `maxPerClient` enforcement | ⬜ (fixtures green, no live run) |
-| Starvation — promotion deadline | Java `max-queued-time-ms` (60s) | ⬜ (covered by live runs when measured) |
+| Starvation — promotion deadline | Java `max-queued-time-ms` (60s) | 🔶 characterized, not gated (cold asymmetry Go ~780 / Java ~1000; warm 0/0 both sides) |
 | Starvation — K=3 window gate | **none** (harness-original, CORRECTION-3) | — by construction; validated by fixture + spec, never by differential |
 
 ---
@@ -355,7 +356,7 @@ The Java implementation is the behavioral reference and executable oracle. `equa
 
 - Preserves fairness semantics, virtual-time behavior, CMS behavior, and adaptive RPS logic
 - Replaces framework-specific mechanisms (Spring DI, JPA, ShedLock) with Go-native equivalents (`pgx`, advisory locks, goroutines)
-- Is validated by differential testing: same workload, same configuration, compare dispatch decisions and fairness metrics (harness in `test/differential/`; smoke01 ran — see maturity table; full-window verdicts pending real-workload comparison)
+- Is validated by differential testing: same workload, same configuration, compare dispatch decisions and fairness metrics (harness in `test/differential/`; warm-class w2000 gate green — see maturity table)
 - Is not a class-by-class translation and does not aim to be
 
 Key Java references:
