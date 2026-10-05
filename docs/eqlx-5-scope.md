@@ -159,10 +159,17 @@ Row 13 is evidence-only per the match criterion above.
 - Java states no starvation bound (fairness shares imply it loosely, but
   nothing testable). This scope defines it rather than leaving the
   harness to invent it per run: **no tenant with continuous backlog goes
-  more than K consecutive dispatch windows (same 1000-dispatch windows as
-  §4) with zero dispatches, K=3.** Rationale: shares could technically
-  hold while one tenant starves for a full window and gorges the next;
-  the K-window rule forbids exactly that shape.
+  more than K consecutive zero-dispatch 100-windows, K=3.** Rationale:
+  shares could technically hold while one tenant starves briefly and
+  gorges after; the K-window rule forbids exactly that shape.
+- **Window-scale refinement (pinned): starvation runs at 100, not the
+  §4 1000.** An earlier draft used the same 1000-windows for both gates;
+  implementation proved that un-isolatable: a 400-wide gap needs catch-up
+  density that trips any tight quota bound (pigeonhole — the excess lives
+  in some window at every scale). At 100-scale with compensated catch-up,
+  per-window density stays within quota bound while 4 consecutive zeros
+  still fire starvation. Different window scales per gate is what makes
+  the calibration matrix satisfiable, not a relaxation.
 - **Tighter-wins, stated explicitly:** the scope's definition is the
   acceptance criterion for both sides. If the harness discovers Java
   tolerating K=5 on some workload while the scope says K=3, that is
@@ -214,6 +221,12 @@ Row 13 is evidence-only per the match criterion above.
   quota 100-windows/+10. Each fixture asserts its own gate fires, the
   other two pass, and `RequireGate` fails the fixture loudly if run below
   one full window — fixtures cannot be configured into vacuity.
+- **Scope qualifier:** the construction above proves calibration is
+  satisfiable for the current four-gate matrix (order, fairness,
+  starvation, quota — one fixture each, complete as of this writing), not
+  in general. A future fixture against a differently-sized gap or bound
+  may need a different compensation shape or may be un-isolatable; that is
+  a per-fixture proof obligation, not an inherited property.
 
 ### 7. Output format — methodology, not target numbers
 

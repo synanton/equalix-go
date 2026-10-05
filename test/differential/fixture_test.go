@@ -12,7 +12,11 @@ import (
 )
 
 // stubInner returns tasks in priority order regardless of age, like a real
-// priority-ordered repository would.
+// priority-ordered repository would. Returned tasks are treated as
+// immutable: decorators and SelectBatch read them, and background
+// goroutines in live runs mutate only through Save (which copies). Never
+// mutate a returned pointer in place — that is the pointer-aliasing race
+// class (copy-on-read rule); the fake would hand out shared mutable state.
 type stubInner struct {
 	tasks []*domain.Task
 }
