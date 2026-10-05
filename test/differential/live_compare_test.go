@@ -12,6 +12,16 @@ import (
 	"time"
 )
 
+// shaOr reads a build SHA for results attribution. "Unrecorded" is an
+// explicit marker, never a silent default — a result that cannot name its
+// builds is not publishable per the scope's output contract.
+func shaOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 // jdbcToPgx derives a pgx DSN from a JDBC URL + credentials (same database,
 // driver-appropriate scheme) so the harness can poll quiescence directly.
 func jdbcToPgx(jdbc, user, pass string) string {
@@ -174,7 +184,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 		MarkerJava: java.Marker, MarkerGo: goRes.Marker,
 	}
 	if err := WriteResult(outDir, "EQLX-5 smoke01: w127 (21 tasks, 1:2:7) fixed-100ms stub, as-fast-as-possible",
-		resolved, "java-jar", "go-bin", mm); err != nil {
+		resolved, shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), shaOr("EQUALIX_GO_SHA", "go-unrecorded"), mm); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("java shares: %s", summarize(java.Log))

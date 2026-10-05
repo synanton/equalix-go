@@ -97,6 +97,8 @@ jobs:
           EQUALIX_PG_USER: cmp
           EQUALIX_PG_PASSWORD: x
           EQUALIX_RESULTS_DIR: ${{ github.workspace }}/results
+          EQUALIX_JAVA_SHA: ${{ inputs.java_sha }}
+          EQUALIX_GO_SHA: ${{ github.sha }}
         run: |
           go test -count=1 -tags=differential -run 'TestLiveJavaVsGo|TestLiveGoVsGo' \
             ./test/differential/... 2>&1 | tee compare.log; test ${PIPESTATUS[0]} -eq 0
