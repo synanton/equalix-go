@@ -34,9 +34,10 @@ import (
 
 func main() {
 	// healthcheck subcommand (Docker HEALTHCHECK in shell-less images,
-	// k8s exec probes): probes the serving mux, exits 0/1. Default path
-	// is /metrics (200 = mux serving, unauthenticated); repoint to
-	// /readyz with --path once GAP-5 lands the readiness endpoint.
+	// k8s exec probes): liveness probe, exits 0/1. Default path is
+	// /healthz (process alive, unauthenticated — liveness, never
+	// readiness: a DB outage must not restart the container). Repoint
+	// to /readyz with --path once GAP-5 lands the readiness endpoint.
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		os.Exit(runHealthcheck(os.Args[2:]))
 	}
@@ -57,7 +58,7 @@ func runHealthcheck(args []string) int {
 		probeAddr = v
 	}
 	addr := fs.String("addr", probeAddr, "service address to probe")
-	path := fs.String("path", "/metrics", "mux path expecting HTTP 200")
+	path := fs.String("path", "/healthz", "mux path expecting HTTP 200 (liveness only; use /readyz once GAP-5 lands it)")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
