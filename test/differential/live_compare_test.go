@@ -4,6 +4,7 @@ package differential
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -117,6 +118,11 @@ func TestLiveJavaVsGo(t *testing.T) {
 	apiKey := "live-compare-key"
 	ctx := context.Background()
 	calibration := runCalibration(t)
+	warmCfg := WarmupFromEnv()
+
+	// Fresh state per run is established inside runOne after boot (tables
+	// exist only post-migration); residue shares keys and persists V, so
+	// repeated runs without reset would measure history, not the workload.
 
 	wl := os.Getenv("EQUALIX_WORKLOAD")
 	if wl == "" {
@@ -143,11 +149,37 @@ func TestLiveJavaVsGo(t *testing.T) {
 			t.Fatalf("side %s: %v", name, err)
 		}
 		defer proc.Stop()
+		// Reset AFTER boot: tables exist only post-migration (Flyway on
+		// Java boot, manual apply on Go). Resetting before launch would
+		// fail on missing relations; resetting here guarantees identical
+		// fresh state per run regardless of prior runs.
+		if err := ResetDB(ctx, dsn); err != nil {
+			t.Fatalf("side %s reset: %v", name, err)
+		}
+		measureFrom := 0
+		prephase := 0
+		if warmCfg.Tasks > 0 {
+			m, err := RunWarmup(ctx, &http.Client{Timeout: 10 * time.Second}, SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, APIKey: apiKey}, apiKey, workload, stub, warmCfg)
+			if err != nil {
+				t.Fatalf("side %s warmup: %v", name, err)
+			}
+			measureFrom = m
+			// Pin the pre-phase DB size HERE (between warm-up drain and
+			// measurement ingest): counting after RunSide would mix
+			// measurement rows into the pre-phase number.
+			n, err := countDispatched(ctx, dsn)
+			if err != nil {
+				t.Fatalf("side %s prephase count: %v", name, err)
+			}
+			prephase = n
+		}
 		svc := SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, HTTPPort: 0, APIKey: apiKey}
-		res, err := RunSide(ctx, svc, apiKey, workload, stub, 180*time.Second)
+		res, err := RunSide(ctx, svc, apiKey, workload, stub, 180*time.Second, measureFrom)
 		if err != nil {
 			t.Fatalf("side %s: %v", name, err)
 		}
+		res.SpawnedAt, res.ReadyAt = proc.SpawnedAt, proc.ReadyAt
+		res.PrephaseDispatched = prephase
 		return res
 	}
 
@@ -158,8 +190,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 		"go":   {Name: "go", BaseURL: "http://127.0.0.1:18084", DSN: goDSN, APIKey: apiKey},
 	}, apiKey)
 
-	java := runOne("java", "http://127.0.0.1:18083", 18093,
-		jdbcToPgx(env["EQUALIX_JAVA_JDBC"], env["EQUALIX_PG_USER"], env["EQUALIX_PG_PASSWORD"]),
+	java := runOne("java", "http://127.0.0.1:18083", 18093, javaDSN,
 		func() (*Proc, error) {
 			return Launch(ctx, ProcSpec{
 				Name: "java", Bin: "java",
@@ -255,17 +286,33 @@ func TestLiveJavaVsGo(t *testing.T) {
 		JavaPort: 18083, GoPort: 18084, Stub: DefaultLatency(),
 		MarkerJava: java.Marker, MarkerGo: goRes.Marker,
 	}
-	method := "EQLX-5 real01: w2000 (200/400/1400, 1:2:7) fixed-100ms stub, as-fast-as-possible"
+	method := "EQLX-5 real01 [" + warmCfg.Class() + "]: w2000 (200/400/1400, 1:2:7) fixed-100ms stub, as-fast-as-possible"
 	traces := tracer.Stop()
+	fetch := tracer.FetchStats()
 	for side, pts := range traces {
 		if len(pts) > 0 {
-			t.Logf("trace %s: %d samples, rps %.1f→%.1f, dispatched %d, promoted %d",
-				side, len(pts), pts[0].RPS, pts[len(pts)-1].RPS,
-				pts[len(pts)-1].Dispatched, pts[len(pts)-1].Promoted)
+			live, first, last := LiveStats(pts)
+			t.Logf("trace %s: %d samples (%d live, rps %.1f→%.1f), total dispatched %d (incl prephase), promoted %d",
+				side, len(pts), live, first, last,
+				pts[len(pts)-1].TotalDispatched, pts[len(pts)-1].Promoted)
 		}
 	}
-	if err := WriteResult(outDir, method,
-		resolved, shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), shaOr("EQUALIX_GO_SHA", "go-unrecorded"), calibration, traces, mm); err != nil {
+	for side, st := range fetch {
+		t.Logf("trace %s status fetch: %d missed, first: %s, last: %s", side, st.Failed, st.First, st.Last)
+	}
+	startup := map[string]StartupInfo{
+		"java": NewStartup(java.SpawnedAt, java.ReadyAt, java.FirstDispatch),
+		"go":   NewStartup(goRes.SpawnedAt, goRes.ReadyAt, goRes.FirstDispatch),
+	}
+	for side, st := range startup {
+		t.Logf("startup %s: spawn→ready %.0fms, ready→first-dispatch %.0fms",
+			side, st.SpawnToReadyMs, st.ReadyToFirstDispatchMs)
+	}
+	if err := WriteResult(Artifact{Dir: outDir, Method: method,
+		Resolved: resolved, JavaSHA: shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), GoSHA: shaOr("EQUALIX_GO_SHA", "go-unrecorded"), Calibration: calibration, Traces: traces, Fetch: fetch,
+		Warmup: map[string]int{"java": java.Warmup, "go": goRes.Warmup},
+		Prephase: map[string]int{"java": java.PrephaseDispatched, "go": goRes.PrephaseDispatched},
+		Startup: startup, MM: mm}); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("java shares: %s", summarize(java.Log))
@@ -286,6 +333,8 @@ func TestLiveGoVsGo(t *testing.T) {
 	}
 	apiKey := "live-compare-key"
 	ctx := context.Background()
+	calibration := runCalibration(t)
+	warmCfg := WarmupFromEnv()
 	wl := os.Getenv("EQUALIX_WORKLOAD")
 	if wl == "" {
 		wl = "w127.jsonl"
@@ -298,6 +347,19 @@ func TestLiveGoVsGo(t *testing.T) {
 	if dsn2 == "" {
 		t.Skip("EQUALIX_GO_DSN2 not set")
 	}
+	goDSN := os.Getenv("EQUALIX_GO_DSN")
+	if goDSN == "" {
+		t.Skip("EQUALIX_GO_DSN not set")
+	}
+	// Traced like the Java-vs-Go leg: the control protocol compares
+	// divergence RATES across pairs, which needs traces per run on both
+	// legs — an untraced control run contributes no attributable evidence.
+	tracer := StartTracer(ctx, map[string]Side{
+		"go1": {Name: "go1", BaseURL: "http://127.0.0.1:18085", DSN: goDSN, APIKey: apiKey},
+		"go2": {Name: "go2", BaseURL: "http://127.0.0.1:18086", DSN: dsn2, APIKey: apiKey},
+	}, apiKey)
+	// No pre-launch reset here: the GoVsGo sides reset inside runGo after
+	// boot (same reason as above — tables exist only post-migration).
 	runGo := func(name, svcURL string, svcPort, stubPort int, dsn string) SideResult {
 		stub, err := NewStub(StubConfig{
 			Port: stubPort, Latency: DefaultLatency(),
@@ -324,19 +386,57 @@ func TestLiveGoVsGo(t *testing.T) {
 			t.Fatalf("side %s: %v", name, err)
 		}
 		defer proc.Stop()
+		if err := ResetDB(ctx, dsn); err != nil {
+			t.Fatalf("side %s reset: %v", name, err)
+		}
+		measureFrom := 0
+		prephase := 0
+		if warmCfg.Tasks > 0 {
+			m, err := RunWarmup(ctx, &http.Client{Timeout: 10 * time.Second}, SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, APIKey: apiKey}, apiKey, workload, stub, warmCfg)
+			if err != nil {
+				t.Fatalf("side %s warmup: %v", name, err)
+			}
+			measureFrom = m
+			n, err := countDispatched(ctx, dsn)
+			if err != nil {
+				t.Fatalf("side %s prephase count: %v", name, err)
+			}
+			prephase = n
+		}
 		svc := SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, HTTPPort: svcPort, APIKey: apiKey}
-		res, err := RunSide(ctx, svc, apiKey, workload, stub, 180*time.Second)
+		res, err := RunSide(ctx, svc, apiKey, workload, stub, 180*time.Second, measureFrom)
 		if err != nil {
 			t.Fatalf("side %s: %v", name, err)
 		}
+		res.SpawnedAt, res.ReadyAt = proc.SpawnedAt, proc.ReadyAt
+		res.PrephaseDispatched = prephase
 		return res
 	}
 	g1 := runGo("go1", "http://127.0.0.1:18085", 18085, 18095, os.Getenv("EQUALIX_GO_DSN"))
 	g2 := runGo("go2", "http://127.0.0.1:18086", 18086, 18096, dsn2)
-	s1 := sharesOf(g1)
-	s2 := sharesOf(g2)
-	t.Logf("go1 shares: %v warmup=%d", s1, g1.Warmup)
-	t.Logf("go2 shares: %v warmup=%d", s2, g2.Warmup)
+	// Shares gate, same rule as the Java-vs-Go leg: full 1000-windows only,
+	// mismatches recorded into the artifact, verdict after WriteResult.
+	var mm *Mismatch
+	for _, side := range []struct {
+		name string
+		log  RunLog
+	}{{"go1", g1.Log}, {"go2", g2.Log}} {
+		results, m := CompareShares(side.log, 1000, 2)
+		if FullWindows(results) == 0 {
+			t.Logf("%s shares recorded (no full window — gate not applied): %s", side.name, summarize(side.log))
+			continue
+		}
+		if m != nil && mm == nil {
+			mm = m
+		}
+		for _, w := range results {
+			if w.Full {
+				t.Logf("%s window %d deviations: %v (bound ±2)", side.name, w.Window, w.Deviations)
+			}
+		}
+	}
+	t.Logf("go1 shares: %v warmup=%d", sharesOf(g1), g1.Warmup)
+	t.Logf("go2 shares: %v warmup=%d", sharesOf(g2), g2.Warmup)
 	if mm := ComparePair(g1.Log, g2.Log, 1000, 2, "fairness-shares"); mm != nil {
 		t.Logf("GO-VS-GO DIVERGENCE (identical binaries): %v", mm)
 	} else {
@@ -353,6 +453,52 @@ func TestLiveGoVsGo(t *testing.T) {
 		t.Logf("GO-VS-GO STEADY DIVERGENCE: %v", mm)
 	} else {
 		t.Logf("GO-VS-GO STEADY: exact parity")
+	}
+	// Retained artifact, same contract as the Java-vs-Go leg: the control
+	// rate is computed across runs from results.json, so every control run
+	// publishes — especially the diverged ones. Resolved reuses the
+	// java_*/go_* slots for go1/go2 (methodology names the mapping).
+	outDir := os.Getenv("EQUALIX_RESULTS_DIR")
+	if outDir == "" {
+		outDir = "results-live-gvg01"
+	}
+	resolved := &Resolved{
+		JavaDSN: redact(goDSN), GoDSN: redact(dsn2),
+		JavaPort: 18085, GoPort: 18086, Stub: DefaultLatency(),
+		MarkerJava: g1.Marker, MarkerGo: g2.Marker,
+	}
+	method := "EQLX-5 control [" + warmCfg.Class() + "]: go-vs-go (go1 in java_* slots) " + wl + " fixed-100ms stub, as-fast-as-possible"
+	traces := tracer.Stop()
+	fetch := tracer.FetchStats()
+	for side, pts := range traces {
+		if len(pts) > 0 {
+			live, first, last := LiveStats(pts)
+			t.Logf("trace %s: %d samples (%d live, rps %.1f→%.1f), total dispatched %d (incl prephase), promoted %d",
+				side, len(pts), live, first, last,
+				pts[len(pts)-1].TotalDispatched, pts[len(pts)-1].Promoted)
+		}
+	}
+	for side, st := range fetch {
+		t.Logf("trace %s status fetch: %d missed, first: %s, last: %s", side, st.Failed, st.First, st.Last)
+	}
+	goSHA := shaOr("EQUALIX_GO_SHA", "go-unrecorded")
+	startup := map[string]StartupInfo{
+		"go1": NewStartup(g1.SpawnedAt, g1.ReadyAt, g1.FirstDispatch),
+		"go2": NewStartup(g2.SpawnedAt, g2.ReadyAt, g2.FirstDispatch),
+	}
+	for side, st := range startup {
+		t.Logf("startup %s: spawn→ready %.0fms, ready→first-dispatch %.0fms",
+			side, st.SpawnToReadyMs, st.ReadyToFirstDispatchMs)
+	}
+	if err := WriteResult(Artifact{Dir: outDir, Method: method,
+		Resolved: resolved, JavaSHA: goSHA, GoSHA: goSHA, Calibration: calibration, Traces: traces, Fetch: fetch,
+		Warmup: map[string]int{"go1": g1.Warmup, "go2": g2.Warmup},
+		Prephase: map[string]int{"go1": g1.PrephaseDispatched, "go2": g2.PrephaseDispatched},
+		Startup: startup, MM: mm}); err != nil {
+		t.Fatal(err)
+	}
+	if mm != nil {
+		t.Fatalf("GO-VS-GO DIVERGENCE (recorded above): %v", mm)
 	}
 }
 

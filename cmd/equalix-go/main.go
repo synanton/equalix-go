@@ -105,6 +105,14 @@ func toInt64(m map[string]int) map[string]int64 {
 }
 
 func run() error {
+	// Startup milestones feed the differential matrix's
+	// runtime-characterization row (informational, never gated):
+	// main-entry, config-loaded, readiness-ok, serving. slog already
+	// stamps RFC3339 times; the phase key is what drill-down greps for.
+	milestone := func(phase string) {
+		slog.Info("startup milestone", "phase", phase)
+	}
+	milestone("main-entry")
 	var (
 		dsn        = flag.String("dsn", os.Getenv("EQUALIX_DSN"), "PostgreSQL DSN (or EQUALIX_DSN)")
 		addr       = flag.String("addr", ":8080", "HTTP listen address")
@@ -118,6 +126,7 @@ func run() error {
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
 	}
+	milestone("config-loaded")
 	if *dsn == "" {
 		return fmt.Errorf("missing --dsn (or EQUALIX_DSN)")
 	}
@@ -199,6 +208,7 @@ func run() error {
 	} else {
 		slog.Info("cms warmed up", "keys", len(actual))
 	}
+	milestone("readiness-ok")
 
 	// Dispatcher needs an executor to send to. Without --executor-base-url
 	// it stays unwired by explicit decision (dispatch logic stays covered
@@ -243,6 +253,7 @@ func run() error {
 
 	runErr := make(chan error, 1)
 	go func() { runErr <- runner.Run(ctx) }()
+	milestone("serving")
 
 	select {
 	case err := <-serverErr:
