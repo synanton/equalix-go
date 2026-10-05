@@ -30,6 +30,20 @@ This is **not a language port**. The Java code is the behavioral reference; the 
 `🔶` = ran and produced a comparison (smoke-scale); ✅ requires meaningful
 workloads with real fairness measurement (EQLX-5 gate).
 
+#### Differential dimensions (gate-level)
+
+The differential column above is per-area; gates differ in what "validated"
+can mean. Fairness, order, and quota compare Go-to-Java on mechanisms Java
+has. Starvation splits in two:
+
+| Gate | Oracle counterpart | Differential status |
+|---|---|---|
+| Fairness shares (§4 bound) | Java weighted shares | 🔶 smoke01 |
+| Dispatch order (diagnostic) | Java dispatch sequence | 🔶 smoke01 (evidence only, never gates) |
+| Quota bound | Java `maxPerClient` enforcement | ⬜ (fixtures green, no live run) |
+| Starvation — promotion deadline | Java `max-queued-time-ms` (60s) | ⬜ (covered by live runs when measured) |
+| Starvation — K=3 window gate | **none** (harness-original, CORRECTION-3) | — by construction; validated by fixture + spec, never by differential |
+
 ---
 
 ## What It Is
