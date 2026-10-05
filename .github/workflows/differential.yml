@@ -1,0 +1,116 @@
+# EQLX-5 differential comparison: scheduled + manual dispatch.
+#
+# Bump mechanism (pinned, not silent): the Java oracle SHA is a workflow
+# input defaulting to the SHA in the oracle-determination entry
+# (docs/spec.md §13). To move the pin, open a PR changing the default
+# below — never push a SHA change directly. If the Java side moves under a
+# pinned SHA run, the comparison reports mismatch (a result), not a
+# workflow error; infra failures (DB unreachable, jar missing, stub
+# timeout) fail the workflow distinctly from comparison mismatches.
+#
+# Starvation-differential caveat (CORRECTION-3): this workflow's
+# differential comparison covers the promotion-deadline mechanism, not the
+# harness-original K=3 window gate. A green run never claims K=3 parity —
+# see README "Differential dimensions" and the maturity table.
+name: differential
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # nightly, UTC
+  workflow_dispatch:
+    inputs:
+      java_sha:
+        description: "Pinned Java oracle commit (see spec §13 oracle determination)"
+        default: "996fc8b"
+        required: true
+      workload:
+        description: "Workload file under test/differential/workloads"
+        default: "w127.jsonl"
+        required: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: equalix-go
+          ref: ${{ github.ref }}
+
+      - uses: actions/checkout@v4
+        with:
+          repository: synanton/equalix
+          ref: ${{ inputs.java_sha }}
+          path: equalix
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Start Postgres
+        run: docker compose -f equalix-go/test/differential/docker-compose.yml up -d --wait
+
+      - name: Create databases
+        run: |
+          docker compose -f equalix-go/test/differential/docker-compose.yml exec -T postgres \
+            psql -U postgres -c "CREATE USER cmp WITH PASSWORD 'x' SUPERUSER;" \
+            -c "CREATE DATABASE equalix_java OWNER cmp;" \
+            -c "CREATE DATABASE equalix_go OWNER cmp;" \
+            -c "CREATE DATABASE equalix_go2 OWNER cmp;"
+
+      - name: Build Go binary
+        working-directory: equalix-go
+        run: go build -o /tmp/equalix-go ./cmd/equalix-go
+
+      - name: Build Java jar
+        working-directory: equalix
+        run: mvn -B -q package -DskipTests
+
+      - name: Apply Go migrations
+        run: |
+          for f in equalix-go/migrations/0000*.sql; do
+            python3 -c "
+          raw = open('$f').read()
+          up = raw.split('-- +goose Down')[0].replace('-- +goose Up','')
+          open('/tmp/mig.sql','w').write(up)
+          "
+            docker cp /tmp/mig.sql "$(docker compose -f equalix-go/test/differential/docker-compose.yml ps -q postgres):/tmp/mig.sql"
+            docker compose -f equalix-go/test/differential/docker-compose.yml exec -T postgres \
+              psql -U cmp -d equalix_go -q -f /tmp/mig.sql
+          done
+
+      - name: Run comparison
+        working-directory: equalix-go
+        env:
+          EQUALIX_LIVE_COMPARE: "1"
+          EQUALIX_JAVA_JAR: ${{ github.workspace }}/equalix/target/equalix-1.0.0-SNAPSHOT.jar
+          EQUALIX_GO_BIN: /tmp/equalix-go
+          EQUALIX_JAVA_JDBC: jdbc:postgresql://localhost:5433/equalix_java
+          EQUALIX_GO_DSN: postgres://cmp:x@localhost:5433/equalix_go?sslmode=disable
+          EQUALIX_GO_DSN2: postgres://cmp:x@localhost:5433/equalix_go2?sslmode=disable
+          EQUALIX_PG_USER: cmp
+          EQUALIX_PG_PASSWORD: x
+          EQUALIX_RESULTS_DIR: ${{ github.workspace }}/results
+          EQUALIX_JAVA_SHA: ${{ inputs.java_sha }}
+          EQUALIX_GO_SHA: ${{ github.sha }}
+          # Generous startup on cold runners (Maven + Spring boot from
+          # scratch); tighten once baselines exist. A genuinely broken
+          # service still fails loudly naming the side.
+          EQUALIX_JAVA_STARTUP_TIMEOUT: 5m
+          EQUALIX_GO_STARTUP_TIMEOUT: 2m
+        run: |
+          go test -count=1 -tags=differential -run 'TestLiveJavaVsGo|TestLiveGoVsGo' \
+            ./test/differential/... 2>&1 | tee compare.log; test ${PIPESTATUS[0]} -eq 0
+
+      - name: Publish results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: differential-results
+          path: results/

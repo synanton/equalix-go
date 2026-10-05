@@ -170,6 +170,19 @@ Row 13 is evidence-only per the match criterion above.
   per-window density stays within quota bound while 4 consecutive zeros
   still fire starvation. Different window scales per gate is what makes
   the calibration matrix satisfiable, not a relaxation.
+- [x] **CORRECTION-3 (recorded): there is no Java starvation window to
+  match.** Verified against Java main: anti-starvation is an aging-credit
+  formula plus a `max-queued-time-ms: 60000` promotion deadline — a TIME
+  threshold, not a dispatch-window count. No K-consecutive-windows concept
+  exists anywhere in the Java tree (grep: no windowed starvation check in
+  domain services, docs, or config). The 100-window K=3 gate is therefore
+  harness-original, chosen on sensitivity (catches real starvation shapes
+  at operator-relevant horizons) and constructibility (isolatable per the
+  pigeonhole analysis above) — NOT on Java parity, and the earlier framing
+  that implied a parity confirmation is withdrawn. Closest Java analog is
+  the 60s promotion deadline, a different dimension (time, not dispatch
+  count); their relationship is workload-rate-dependent (400 dispatches ≈
+  60s only at ~7 dispatches/s) and is documented as such, not equated.
 - **Tighter-wins, stated explicitly:** the scope's definition is the
   acceptance criterion for both sides. If the harness discovers Java
   tolerating K=5 on some workload while the scope says K=3, that is
