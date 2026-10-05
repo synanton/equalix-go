@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/synanton/equalix-go/internal/port"
 )
@@ -60,6 +61,12 @@ func (w *Watchdog) TickForTest(ctx context.Context) error { return w.tick(ctx) }
 // the tick would serialize a 200ms operation behind lock acquisition for
 // no correctness gain.
 func (w *Watchdog) tick(ctx context.Context) error {
+	// Reconcile duration is the EQLX-4 watchdog signal (the GROUP BY gate
+	// evidence). Observed on every exit path via defer — a failed tick's
+	// duration is signal too, not just the happy path.
+	defer func(start time.Time) {
+		w.deps.Metrics.ObserveWatchdogReconciliation(time.Since(start).Seconds())
+	}(time.Now())
 	// Phase 1: authoritative snapshot + counts repair (thresholdless —
 	// any mismatch is a bug, repair is idempotent).
 	actual, err := w.deps.Tasks.CountInFlight(ctx)

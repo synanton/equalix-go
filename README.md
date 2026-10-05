@@ -298,16 +298,25 @@ On `success=false`, `error` is required. Duplicate completions of terminal tasks
 
 ### Metrics (Prometheus)
 
-Go metric names (planned; mirroring Java `equalix.*`):
+Served at `GET /metrics` (unauthenticated — do not expose publicly).
+Wire names are canonical per spec §13 (Prometheus metric naming); the
+sole source is `internal/adapter/metrics` — this table mirrors it:
 
-- `equalix_tasks_dispatched_total{tenant}`
-- `equalix_tasks_completed_total{tenant,result}`
-- `equalix_dispatch_latency_seconds`
-- `equalix_cms_drift_estimate`
-- `equalix_rps_current`
-- `equalix_rps_target`
+- `equalix_tasks_dispatched_total{tenant}` (tenant-capped)
+- `equalix_tasks_completed_total{tenant,result}` (tenant-capped)
+- `equalix_dispatch_decision_latency_seconds` (histogram)
+- `equalix_timeout_detection_latency_seconds` (histogram)
+- `equalix_watchdog_reconciliation_duration_seconds` (histogram)
+- `equalix_cms_warmup_duration_seconds` (histogram)
+- `equalix_rps_current`, `equalix_received_queue_depth` (gauges)
+- `equalix_cms_drift_estimate{tenant}` (gauge, capped + truncated)
+- `equalix_metrics_cardinality_exceeded_total{metric}` (over-cap drops)
 
-Java reference metrics (`/actuator/prometheus`): `equalix_task_duration_seconds`, `equalix_task_errors_total`, `equalix_adaptive_rps`, `equalix_cms_estimation_drift{...}`, `equalix_hierarchy_dispatches_total{layer,node}`.
+Deferred (no port source yet): `rps_target`, brake/deadband state
+gauges. Java reference metrics (`/actuator/prometheus`):
+`equalix_task_duration_seconds`, `equalix_task_errors_total`,
+`equalix_adaptive_rps`, `equalix_cms_estimation_drift{...}`,
+`equalix_hierarchy_dispatches_total{layer,node}`.
 
 ### Endpoints
 

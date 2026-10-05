@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	promadapter "github.com/synanton/equalix-go/internal/adapter/metrics"
 	"github.com/synanton/equalix-go/internal/domain"
 	"github.com/synanton/equalix-go/internal/port"
 )
@@ -228,10 +230,13 @@ func (f *fakeMetrics) RecordCompletion(t, r string, d int64) {
 	f.completions = append(f.completions, completion{t, r, d})
 }
 
-func (f *fakeMetrics) ObserveDispatchLatency(_ float64) {}
-func (f *fakeMetrics) SetRPS(r float64)                 { f.rps = r }
-func (f *fakeMetrics) PublishDrift(_ map[string]int64)  {}
-func (f *fakeMetrics) SetQueueDepth(_ int)              {}
+func (f *fakeMetrics) ObserveDispatchLatency(_ float64)        {}
+func (f *fakeMetrics) ObserveTimeoutLatency(_ float64)         {}
+func (f *fakeMetrics) ObserveWatchdogReconciliation(_ float64) {}
+func (f *fakeMetrics) ObserveCMSWarmup(_ float64)              {}
+func (f *fakeMetrics) SetRPS(r float64)                        { f.rps = r }
+func (f *fakeMetrics) PublishDrift(_ map[string]int64)         {}
+func (f *fakeMetrics) SetQueueDepth(_ int)                     {}
 
 type fakeRPS struct{ rps float64 }
 
@@ -262,6 +267,64 @@ func newFixture() *fixture {
 		APIKey: "changeme", MaxPayloadBytes: 1024,
 	})
 	return fx
+}
+
+// TestMetricsEndpointServesRegistry wires the real Prometheus adapter
+// into the router and asserts the exposition carries the series the
+// service observed: the exporter path, the registry, and the observation
+// calls composed end to end (no auth — scrapers carry no API keys).
+func TestMetricsEndpointServesRegistry(t *testing.T) {
+	pm, err := promadapter.New(promadapter.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(Deps{
+		Tasks:     &fakeTasks{tasks: map[string]*domain.Task{}},
+		Counts:    &fakeCounts{m: map[string]int{}},
+		Sequences: &fakeSeqs{m: map[string]*domain.SequenceState{}},
+		CMS:       &fakeCMS{m: map[string]int64{}},
+		Metrics:   pm, RPS: fakeRPS{rps: 8.5},
+		Clock:  domain.NewFakeClock(time.Now()),
+		APIKey: "changeme", MaxPayloadBytes: 1024,
+		MetricsPath: "/metrics", MetricsHandler: pm.Handler(),
+	})
+	pm.RecordDispatch("a")
+	pm.SetRPS(9.25)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics status = %d, want 200 (unauthenticated)", resp.StatusCode)
+	}
+	buf, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		promadapter.TasksDispatched,
+		promadapter.RPSCurrent,
+		promadapter.TasksDispatched + `{tenant="a"} 1`,
+	} {
+		if !strings.Contains(string(buf), want) {
+			t.Fatalf("exposition missing %q", want)
+		}
+	}
+}
+
+// TestMetricsPathRequiresHandler pins the wiring invariant: a metrics
+// path with no handler (or vice versa) fails fast at router build, never
+// serves a half-wired endpoint.
+func TestMetricsPathRequiresHandler(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("half-wired metrics endpoint did not panic")
+		}
+	}()
+	NewRouter(Deps{MetricsPath: "/metrics"})
 }
 
 func (fx *fixture) do(method, path, body string, key string) *httptest.ResponseRecorder {

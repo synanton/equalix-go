@@ -34,11 +34,17 @@ type ThrottleRecorder interface {
 // Deps wires a Handler. MaxPayloadBytes mirrors app.queue.max-payload-bytes
 // (default 1048576); APIKey mirrors app.security.api-key.
 type Deps struct {
-	Tasks           port.TaskRepository
-	Counts          port.CountsRepository
-	Sequences       port.SequenceStateRepository
-	CMS             port.CMSStore
-	Metrics         port.Metrics
+	Tasks     port.TaskRepository
+	Counts    port.CountsRepository
+	Sequences port.SequenceStateRepository
+	CMS       port.CMSStore
+	Metrics   port.Metrics
+	// MetricsPath + MetricsHandler expose the Prometheus registry OUTSIDE
+	// /api/v1 auth (scrapers don't carry API keys). Both set or neither:
+	// a path with no handler (or vice versa) is a wiring bug, fail loud
+	// in NewRouter. Operators must not expose this path publicly.
+	MetricsPath     string
+	MetricsHandler  http.Handler
 	RPS             RPSReader
 	Throttle        ThrottleRecorder
 	Clock           domain.Clock
@@ -53,6 +59,9 @@ type Handler struct {
 
 // NewRouter builds the chi router with auth on /api/v1/*.
 func NewRouter(d Deps) http.Handler {
+	if (d.MetricsPath == "") != (d.MetricsHandler == nil) {
+		panic("http: MetricsPath and MetricsHandler must be set together")
+	}
 	h := &Handler{deps: d}
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {
@@ -63,6 +72,9 @@ func NewRouter(d Deps) http.Handler {
 		r.Get("/tasks", h.listTasks)
 		r.Get("/status", h.status)
 	})
+	if d.MetricsPath != "" {
+		r.Handle(d.MetricsPath, d.MetricsHandler)
+	}
 	return r
 }
 
