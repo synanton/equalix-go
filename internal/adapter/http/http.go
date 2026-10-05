@@ -75,6 +75,14 @@ func NewRouter(d Deps) http.Handler {
 	if d.MetricsPath != "" {
 		r.Handle(d.MetricsPath, d.MetricsHandler)
 	}
+	// Minimal liveness: 200 while the mux serves, outside auth (probes
+	// carry no API keys). This is NOT readiness — DB, locks, and
+	// migrations are not checked here. Full liveness/readiness
+	// semantics (503 on shutdown drain, /readyz with dependency checks)
+	// land with GAP-5; the healthcheck subcommand repoints there then.
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 	return r
 }
 

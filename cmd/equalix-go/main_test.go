@@ -109,7 +109,7 @@ func TestLoadFileConfig(t *testing.T) {
 
 func TestHealthcheck(t *testing.T) {
 	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/metrics" {
+		if r.URL.Path != "/healthz" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -117,6 +117,7 @@ func TestHealthcheck(t *testing.T) {
 	}))
 	defer ok.Close()
 	srvAddr := ok.Listener.Addr().String()
+	// Default path is /healthz (liveness): no --path flag exercises it.
 	if code := runHealthcheck([]string{"--addr", srvAddr}); code != 0 {
 		t.Fatalf("healthy instance exit = %d, want 0", code)
 	}

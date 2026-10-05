@@ -13,6 +13,11 @@
 # included (scratch lacks them), no shell to exploit, standard non-root
 # user 65532. No HEALTHCHECK shell available, so the healthcheck
 # subcommand (same binary) serves docker --health-cmd and k8s probes.
+#
+# Health signal (pinned): /healthz liveness, NOT /metrics — the exporter
+# serves 200 with a dead DB, which would report a broken container
+# healthy. TODO(GAP-5): repoint the healthcheck --path to /readyz once
+# the readiness endpoint (DB, locks, migrations, shutdown drain) lands.
 
 ARG GO_VERSION=1.22
 

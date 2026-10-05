@@ -269,6 +269,20 @@ func newFixture() *fixture {
 	return fx
 }
 
+// TestHealthzIsUnauthenticatedLiveness pins the minimal contract:
+// 200 with no API key (probes carry none), independent of every
+// dependency. Readiness semantics (DB, locks, migrations, shutdown
+// drain) belong to GAP-5, not this route.
+func TestHealthzIsUnauthenticatedLiveness(t *testing.T) {
+	fx := newFixture()
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	fx.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("healthz = %d, want 200", rec.Code)
+	}
+}
+
 // TestMetricsEndpointServesRegistry wires the real Prometheus adapter
 // into the router and asserts the exposition carries the series the
 // service observed: the exporter path, the registry, and the observation
