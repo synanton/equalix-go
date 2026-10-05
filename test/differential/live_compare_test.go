@@ -193,20 +193,27 @@ func TestLiveJavaVsGo(t *testing.T) {
 	// exists. Below one window of volume the gate is vacuous (a partial
 	// tail never fails) — shares are recorded, never claimed. Smoke runs
 	// (21 tasks vs 1000-window) exercise the pipeline, not the bound.
-	for side, log := range map[string]RunLog{"java": java.Log, "go": goRes.Log} {
-		results, mm := CompareShares(log, 1000, 2)
+	// Mismatches are RECORDED, not fatalf'd here: the artifact must publish
+	// even on divergence (a mismatch with classification is the whole
+	// point of results.json); the verdict fatalf's after WriteResult.
+	var mm *Mismatch
+	for _, side := range []struct {
+		name string
+		log  RunLog
+	}{{"java", java.Log}, {"go", goRes.Log}} {
+		results, m := CompareShares(side.log, 1000, 2)
 		if FullWindows(results) == 0 {
-			t.Logf("%s shares recorded (no full window — gate not applied): %s", side, summarize(log))
+			t.Logf("%s shares recorded (no full window — gate not applied): %s", side.name, summarize(side.log))
 			continue
 		}
-		if mm != nil {
-			t.Fatalf("%s shares diverged: %v", side, mm)
+		if m != nil && mm == nil {
+			mm = m
 		}
 		// Numeric deviations per tenant, win or lose — "shares matched" is
 		// not a result, numbers against the bound are.
 		for _, w := range results {
 			if w.Full {
-				t.Logf("%s window %d deviations: %v (bound ±2)", side, w.Window, w.Deviations)
+				t.Logf("%s window %d deviations: %v (bound ±2)", side.name, w.Window, w.Deviations)
 			}
 		}
 	}
@@ -231,8 +238,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 		t.Logf("ORDER DIAGNOSTIC: steady orders identical")
 	}
 	// Verdict recorded is shares-parity (the gated invariant); ordering is
-	// evidence, logged above.
-	var mm *Mismatch
+	// evidence, logged above. mm flows into WriteResult below, then gates.
 	outDir := os.Getenv("EQUALIX_RESULTS_DIR")
 	if outDir == "" {
 		outDir = "results-live-smoke01"
