@@ -20,6 +20,10 @@ import (
 type Tracer struct {
 	mu     sync.Mutex
 	points map[string][]TracePoint
+	// firstErr records the first fetch error per side: a persistently
+	// failing sampler (all -1s) otherwise reads as "controller dead"
+	// with no indication whether it was auth, connect, decode, or status.
+	firstErr map[string]string
 	cancel context.CancelFunc
 	done   chan struct{}
 }
@@ -29,7 +33,7 @@ type Tracer struct {
 // each side's database (uniform SQL, no API dependency).
 func StartTracer(ctx context.Context, sides map[string]Side, apiKey string) *Tracer {
 	ctx, cancel := context.WithCancel(ctx)
-	t := &Tracer{points: map[string][]TracePoint{}, cancel: cancel, done: make(chan struct{})}
+	t := &Tracer{points: map[string][]TracePoint{}, firstErr: map[string]string{}, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(t.done)
 		t.sample(sides, apiKey)
@@ -61,6 +65,12 @@ func (t *Tracer) sample(sides map[string]Side, _ string) {
 		p := TracePoint{At: now, RPS: -1}
 		if rps, err := fetchRPS(s); err == nil {
 			p.RPS = rps
+		} else {
+			t.mu.Lock()
+			if _, seen := t.firstErr[name]; !seen {
+				t.firstErr[name] = err.Error()
+			}
+			t.mu.Unlock()
 		}
 		// RPS -1 = no reading (not zero — zero is a real throttle floor
 		// value and must never be confused with a missed sample).
@@ -116,6 +126,18 @@ func fetchCounts(s Side) (dispatched, promoted int) {
 	_ = conn.QueryRow(ctx, `SELECT COUNT(*) FROM tasks WHERE status <> 'RECEIVED'`).Scan(&dispatched)
 	_ = conn.QueryRow(ctx, `SELECT COUNT(*) FROM tasks WHERE priority <= 0`).Scan(&promoted)
 	return dispatched, promoted
+}
+
+// FirstErrors returns the first /status fetch error per side ("" = none).
+// Logged by the live test so a persistently dark sampler names its cause.
+func (t *Tracer) FirstErrors() map[string]string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make(map[string]string, len(t.firstErr))
+	for k, v := range t.firstErr {
+		out[k] = v
+	}
+	return out
 }
 
 // Stop ends sampling and returns the series. Call after drain, before

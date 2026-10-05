@@ -274,6 +274,9 @@ func TestLiveJavaVsGo(t *testing.T) {
 				pts[len(pts)-1].Dispatched, pts[len(pts)-1].Promoted)
 		}
 	}
+	for side, firstErr := range tracer.FirstErrors() {
+		t.Logf("trace %s first status error: %s", side, firstErr)
+	}
 	if err := WriteResult(outDir, method,
 		resolved, shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), shaOr("EQUALIX_GO_SHA", "go-unrecorded"), calibration, traces, mm); err != nil {
 		t.Fatal(err)
