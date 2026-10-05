@@ -122,12 +122,14 @@ func TestMigrateKnobPrecedence(t *testing.T) {
 	if err != nil || !got.MigrateOnStartup {
 		t.Fatalf("env did not enable: %+v %v", got, err)
 	}
-	// Explicit flag false vetoes env true.
+	// Explicit flag false vetoes env true AND file true simultaneously.
+	fileTrue := true
 	got, err = resolveSettings(map[string]bool{"migrate-on-startup": true},
 		settings{MigrateOnStartup: false},
-		getenvOf(map[string]string{"EQUALIX_MIGRATE_ON_STARTUP": "true"}), fileConfig{})
+		getenvOf(map[string]string{"EQUALIX_MIGRATE_ON_STARTUP": "true"}),
+		fileConfig{MigrateOnStartup: &fileTrue})
 	if err != nil || got.MigrateOnStartup {
-		t.Fatalf("explicit false did not veto: %+v %v", got, err)
+		t.Fatalf("explicit false did not veto all sources: %+v %v", got, err)
 	}
 	// File enables and carries the external dir.
 	tr := true

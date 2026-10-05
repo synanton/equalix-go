@@ -2,13 +2,12 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io/fs"
 	"os"
 
 	"github.com/jackc/pgx/v5"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
 	"github.com/synanton/equalix-go/migrations"
@@ -16,9 +15,21 @@ import (
 
 // migrateLockKey is the well-known advisory-lock key serializing
 // concurrent startups against the same database (single global
-// namespace per DB — one migration stream, one key). Session-scoped:
-// held on a dedicated connection for the migration duration, released
-// by unlock or connection close (including process exit).
+// namespace per DB — one migration stream, one key). Fixed constant,
+// not derived: derivation (db name + schema + prefix hash) buys nothing
+// when the namespace is already one-stream-per-database, and a fixed
+// key is greppable in pg_locks. Collision semantics, stated plainly:
+// another migrator using this key blocks (mutual serialization), never
+// corrupts — the failure mode of sharing is waiting, not double-apply.
+// Session-scoped: held on a dedicated NON-POOLED connection
+// (pgx.Connect, never the pool) for the migration duration, explicitly
+// unlocked first, then closed — LIFO defers below guarantee the order,
+// and close releases even on failure paths (including process exit).
+// PgBouncer warning: session-level locks require a DIRECT connection.
+// Behind transaction-pooling PgBouncer the lock silently stops working
+// (each statement may land on a different backend). The migration DSN
+// must bypass the pooler; this is documented, not detected — there is
+// no reliable in-protocol PgBouncer fingerprint worth asserting on.
 const migrateLockKey int64 = 727940425575961
 
 // migrateStatementTimeout bounds any single migration statement: a
@@ -26,6 +37,14 @@ const migrateLockKey int64 = 727940425575961
 // startup behind an unbounded DDL. Migrations expected to exceed it
 // run out-of-band (runbook), never with a raised timeout here.
 const migrateStatementTimeout = "300s"
+
+// migrateLockTimeout bounds lock ACQUISITION waits during DDL: a
+// migration blocked >30s on a busy table's ACCESS EXCLUSIVE fails fast
+// instead of holding startup (and the advisory lock, stalling every
+// other starting instance behind it). Distinct from statement_timeout,
+// which does not cover lock waits — and neither covers the advisory
+// lock wait itself (that one is bounded by ctx cancel / SIGTERM).
+const migrateLockTimeout = "30s"
 
 // Migrate applies pending migrations (embedded FS, or dir when set)
 // under the advisory lock, then releases it. Fail-fast: any error
@@ -44,6 +63,10 @@ func Migrate(ctx context.Context, dsn, dir string) error {
 		`SET SESSION statement_timeout = '`+migrateStatementTimeout+`'`); err != nil {
 		return fmt.Errorf("postgres: migrate statement timeout: %w", err)
 	}
+	if _, err := lockConn.Exec(ctx,
+		`SET SESSION lock_timeout = '`+migrateLockTimeout+`'`); err != nil {
+		return fmt.Errorf("postgres: migrate lock timeout: %w", err)
+	}
 	// Blocks until acquired: concurrent startups serialize here, the
 	// loser migrates nothing (already-applied versions are no-ops).
 	if _, err := lockConn.Exec(ctx,
@@ -55,10 +78,17 @@ func Migrate(ctx context.Context, dsn, dir string) error {
 			`SELECT pg_advisory_unlock($1)`, migrateLockKey)
 	}()
 
-	db, err := sql.Open("pgx", dsn)
+	dbCfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		return fmt.Errorf("postgres: migrate connect: %w", err)
+		return fmt.Errorf("postgres: migrate dsn: %w", err)
 	}
+	// Timeouts as CONNECT-STARTUP params, not SET-on-a-conn: goose runs
+	// DDL across pooled connections, and a SET would stick to whichever
+	// checkout happened to run it. RuntimeParams ride every new backend
+	// connection, so all DDL is bounded regardless of pooling.
+	dbCfg.RuntimeParams["statement_timeout"] = migrateStatementTimeout
+	dbCfg.RuntimeParams["lock_timeout"] = migrateLockTimeout
+	db := stdlib.OpenDB(*dbCfg)
 	defer db.Close()
 	// Provider (not the package-level Up): the package-level API keeps
 	// global dialect/FS state, which leaks between calls in one process
