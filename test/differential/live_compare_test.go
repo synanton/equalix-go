@@ -5,6 +5,7 @@ package differential
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,6 +21,57 @@ func shaOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// runCalibration executes the four calibration fixtures as a subprocess
+// and returns their names on success. The live comparison refuses to run
+// unless every fixture fires as designed — a broken comparator must fail
+// here, loudly, before any real workload is measured. Returns the fired
+// gate list for the results artifact.
+func runCalibration(t *testing.T) []string {
+	t.Helper()
+	fixtures := []struct {
+		name string
+		args []string
+	}{
+		{"FirstQueued", []string{"-run", "TestFalsificationFirstQueued"}},
+		{"InvertedWeights", []string{"-run", "TestFalsificationInvertedWeights"}},
+		{"Starving", []string{"-run", "TestStarvingIsolatesStarvationGate"}},
+		{"QuotaIgnoring", []string{"-run", "TestQuotaIsolatesQuotaGate"}},
+	}
+	var fired []string
+	for _, f := range fixtures {
+		args := append([]string{"test", "-count=1", "-tags=differential"}, f.args...)
+		args = append(args, "./test/differential/...")
+		cmd := exec.Command("go", args...)
+		cmd.Dir = moduleRoot(t)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("pre-flight calibration %s did not fire: %v\n%s", f.name, err, out)
+		}
+		fired = append(fired, f.name)
+		t.Logf("pre-flight calibration fired: %s", f.name)
+	}
+	return fired
+}
+
+// moduleRoot locates the repo root (the directory holding go.mod) from the
+// test working directory.
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("go.mod not found above working directory")
+		}
+		dir = parent
+	}
 }
 
 // jdbcToPgx derives a pgx DSN from a JDBC URL + credentials (same database,
@@ -64,13 +116,13 @@ func TestLiveJavaVsGo(t *testing.T) {
 	}
 	apiKey := "live-compare-key"
 	ctx := context.Background()
+	calibration := runCalibration(t)
 
-	// Java pgx DSN derived from the JDBC URL + shared credentials (same
-	// database, driver-appropriate scheme).
-	javaPG := strings.Replace(env["EQUALIX_JAVA_JDBC"], "jdbc:postgresql://", "postgres://", 1)
-	_ = javaPG
-
-	workload, err := Load(filepath.Join("workloads", "w127.jsonl"))
+	wl := os.Getenv("EQUALIX_WORKLOAD")
+	if wl == "" {
+		wl = "w127.jsonl"
+	}
+	workload, err := Load(filepath.Join("workloads", wl))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +202,13 @@ func TestLiveJavaVsGo(t *testing.T) {
 		if mm != nil {
 			t.Fatalf("%s shares diverged: %v", side, mm)
 		}
+		// Numeric deviations per tenant, win or lose — "shares matched" is
+		// not a result, numbers against the bound are.
+		for _, w := range results {
+			if w.Full {
+				t.Logf("%s window %d deviations: %v (bound ±2)", side, w.Window, w.Deviations)
+			}
+		}
 	}
 	steady := func(r SideResult) RunLog {
 		o := r.Log.Order[min(r.Warmup, len(r.Log.Order)):]
@@ -183,8 +242,9 @@ func TestLiveJavaVsGo(t *testing.T) {
 		JavaPort: 18083, GoPort: 18084, Stub: DefaultLatency(),
 		MarkerJava: java.Marker, MarkerGo: goRes.Marker,
 	}
-	if err := WriteResult(outDir, "EQLX-5 smoke01: w127 (21 tasks, 1:2:7) fixed-100ms stub, as-fast-as-possible",
-		resolved, shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), shaOr("EQUALIX_GO_SHA", "go-unrecorded"), mm); err != nil {
+	method := "EQLX-5 real01: w2000 (200/400/1400, 1:2:7) fixed-100ms stub, as-fast-as-possible"
+	if err := WriteResult(outDir, method,
+		resolved, shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), shaOr("EQUALIX_GO_SHA", "go-unrecorded"), calibration, mm); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("java shares: %s", summarize(java.Log))
@@ -205,7 +265,11 @@ func TestLiveGoVsGo(t *testing.T) {
 	}
 	apiKey := "live-compare-key"
 	ctx := context.Background()
-	workload, err := Load(filepath.Join("workloads", "w127.jsonl"))
+	wl := os.Getenv("EQUALIX_WORKLOAD")
+	if wl == "" {
+		wl = "w127.jsonl"
+	}
+	workload, err := Load(filepath.Join("workloads", wl))
 	if err != nil {
 		t.Fatal(err)
 	}

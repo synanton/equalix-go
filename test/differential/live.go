@@ -213,19 +213,23 @@ func fetchPrioritiesSvc(ctx context.Context, client *http.Client, svc SideConfig
 
 // Result is the published artifact for one comparison.
 type Result struct {
-	Resolved Resolved  `json:"resolved"`
-	Method   string    `json:"methodology"`
-	Pass     bool      `json:"pass"`
-	Mismatch *Mismatch `json:"mismatch,omitempty"`
+	Resolved Resolved `json:"resolved"`
+	Method   string   `json:"methodology"`
+	// Calibration names the pre-flight fixtures that fired before the
+	// comparison ran (FirstQueued, InvertedWeights, Starving, Quota).
+	// A result without calibration evidence is pipeline output, not a verdict.
+	Calibration []string  `json:"calibration"`
+	Pass        bool      `json:"pass"`
+	Mismatch    *Mismatch `json:"mismatch,omitempty"`
 }
 
 // WriteResult publishes results.json plus methodology.md into dir: dual
 // SHAs attribute the build, resolved config attributes the run.
-func WriteResult(dir, methodology string, resolved *Resolved, javaSHA, goSHA string, mm *Mismatch) error {
+func WriteResult(dir, methodology string, resolved *Resolved, javaSHA, goSHA string, calibration []string, mm *Mismatch) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	res := Result{Resolved: *resolved, Method: methodology, Pass: mm == nil, Mismatch: mm}
+	res := Result{Resolved: *resolved, Method: methodology, Calibration: calibration, Pass: mm == nil, Mismatch: mm}
 	raw, err := json.MarshalIndent(res, "", "  ")
 	if err != nil {
 		return err
