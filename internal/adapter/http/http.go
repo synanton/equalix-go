@@ -5,10 +5,13 @@
 package http
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -50,6 +53,24 @@ type Deps struct {
 	Clock           domain.Clock
 	APIKey          string
 	MaxPayloadBytes int
+	// Readiness wiring (GAP-5 closure). /readyz answers "should this
+	// instance receive traffic": 200 only when every check passes AND
+	// no shutdown drain is in progress. Check list (pinned — this is
+	// the last chance before the endpoint goes public):
+	//   1. Ping — DB reachable (pool ping).
+	//   2. CheckLock — advisory lock acquire/release (same probe the
+	//      pre-launch readiness runs; a DB that answers pings but
+	//      refuses locks is not servable).
+	//   3. CheckMigrated — goose version table covers every known
+	//      migration file (embedded set or --migrations-dir).
+	// CMS deliberately unchecked: the sketch is local, not a
+	// dependency. All four fields required — nil panics (same fail-loud
+	// rule as the metrics pair): a router that silently skips readiness
+	// checks is the silent class wearing an endpoint.
+	Draining      *atomic.Bool
+	Ping          func(ctx context.Context) error
+	CheckLock     func(ctx context.Context) error
+	CheckMigrated func(ctx context.Context) (bool, error)
 }
 
 // Handler serves the /api/v1 contract.
@@ -61,6 +82,9 @@ type Handler struct {
 func NewRouter(d Deps) http.Handler {
 	if (d.MetricsPath == "") != (d.MetricsHandler == nil) {
 		panic("http: MetricsPath and MetricsHandler must be set together")
+	}
+	if d.Draining == nil || d.Ping == nil || d.CheckLock == nil || d.CheckMigrated == nil {
+		panic("http: Draining, Ping, CheckLock, and CheckMigrated are required (readiness must not silently skip)")
 	}
 	h := &Handler{deps: d}
 	r := chi.NewRouter()
@@ -84,6 +108,40 @@ func NewRouter(d Deps) http.Handler {
 	// locks, and migrations are not checked here.
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
+	})
+	// Readiness: 503 the moment a drain starts (checked first — a
+	// draining instance with a healthy DB is still not servable), then
+	// the dependency checks in list order, first failure named in the
+	// body. 5s cap per probe set: readiness must answer, never hang a
+	// kubelet. Outside auth like /healthz (probes carry no API keys).
+	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		fail := func(check string) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, `{"ok":false,"check":%q}`, check)
+		}
+		if d.Draining.Load() {
+			fail("draining")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := d.Ping(ctx); err != nil {
+			fail("db")
+			return
+		}
+		if err := d.CheckLock(ctx); err != nil {
+			fail("lock")
+			return
+		}
+		ok, err := d.CheckMigrated(ctx)
+		if err != nil || !ok {
+			fail("migrations")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"ok":true}`)
 	})
 	return r
 }

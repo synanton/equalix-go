@@ -42,8 +42,14 @@ const migrateStatementTimeout = "300s"
 // migration blocked >30s on a busy table's ACCESS EXCLUSIVE fails fast
 // instead of holding startup (and the advisory lock, stalling every
 // other starting instance behind it). Distinct from statement_timeout,
-// which does not cover lock waits — and neither covers the advisory
-// lock wait itself (that one is bounded by ctx cancel / SIGTERM).
+// which bounds execution, not lock waits — with one PostgreSQL-specific
+// exception that matters here: lock_timeout does NOT cover the advisory
+// lock wait itself (advisory locks are outside its object list), so the
+// pg_advisory_lock acquisition is bounded by statement_timeout (300s),
+// not by this 30s. That is accepted, not fixed: migrations are expected
+// to finish well under 300s, and a bounded retry loop around
+// pg_try_advisory_lock would trade a documented 300s ceiling for
+// retry-budget machinery with identical worst-case behavior.
 const migrateLockTimeout = "30s"
 
 // Migrate applies pending migrations (embedded FS, or dir when set)
