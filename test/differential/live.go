@@ -9,10 +9,127 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 )
+
+// WarmupConfig is the warm workload class: N throwaway tasks bring the RPS
+// controller up before measurement starts. Tasks == 0 is the cold class —
+// identical to every run before the warm variant existed (no pre-phase,
+// measurement from stub entry 0). Classes are never cross-compared: the
+// cold avalanche is a workload-shape effect, and JvG-warm vs GvG-cold
+// would measure the workload, not the implementations.
+//
+// Env: EQUALIX_WARMUP_TASKS (default 0), EQUALIX_WARMUP_RPS (default 15),
+// EQUALIX_WARMUP_TIMEOUT (default 180s).
+type WarmupConfig struct {
+	Tasks   int
+	RPS     float64
+	Timeout time.Duration
+}
+
+// WarmupFromEnv reads the warm-up class knobs. Unset or unparseable means
+// cold (Tasks 0) — a mistyped knob degrades to the historical behavior,
+// never to a half-warmed run.
+func WarmupFromEnv() WarmupConfig {
+	cfg := WarmupConfig{RPS: 15, Timeout: 180 * time.Second}
+	if v := os.Getenv("EQUALIX_WARMUP_TASKS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Tasks = n
+		}
+	}
+	if v := os.Getenv("EQUALIX_WARMUP_RPS"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			cfg.RPS = f
+		}
+	}
+	if v := os.Getenv("EQUALIX_WARMUP_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.Timeout = d
+		}
+	}
+	return cfg
+}
+
+// Class names the workload class for methodology strings and result dirs.
+func (c WarmupConfig) Class() string {
+	if c.Tasks <= 0 {
+		return "cold"
+	}
+	return fmt.Sprintf("warm-%d-rps%.0f", c.Tasks, c.RPS)
+}
+
+// RunWarmup submits cfg.Tasks throwaway tasks (synthetic IDs, workload
+// tenants/weights cycled 1:2:7-style), waits for the controller to reach
+// cfg.RPS, drains them to terminal, and returns the stub dispatch count —
+// the measurement offset RunSide slices from. The pre-phase exists to move
+// the RPS ramp out of the measurement window: cold runs intermittently
+// avalanche window 0 (spec NOTE, promotion asymmetry); warm runs measure
+// the controller at operating RPS on both sides.
+func RunWarmup(ctx context.Context, client *http.Client, svc SideConfig, apiKey string, workload []Task, stub *Stub, cfg WarmupConfig) (int, error) {
+	tenants := []string{}
+	weights := map[string]float64{}
+	for _, t := range workload {
+		if _, ok := weights[t.Tenant]; !ok {
+			tenants = append(tenants, t.Tenant)
+			weights[t.Tenant] = t.Weight
+		}
+	}
+	if len(tenants) == 0 {
+		return 0, fmt.Errorf("differential: side %s warmup needs workload tenants", svc.Name)
+	}
+	svcIDs := map[string]string{}
+	for i := 0; i < cfg.Tasks; i++ {
+		tenant := tenants[i%len(tenants)]
+		wt := Task{ID: fmt.Sprintf("warm-%s-%d", svc.Name, i), Tenant: tenant, Weight: weights[tenant]}
+		_, svcID, err := SubmitTask(ctx, client, svc.BaseURL, apiKey, wt, time.Now())
+		if err != nil {
+			return 0, err
+		}
+		svcIDs[wt.ID] = svcID
+	}
+	// RPS gate: the controller must report at/above floor before the
+	// measurement starts. fetchRPS errors here are loud (unlike the
+	// tracer, which tolerates a downed service): a warm-up that cannot
+	// read RPS cannot claim to be warm.
+	side := Side{Name: svc.Name, BaseURL: svc.BaseURL, APIKey: apiKey}
+	deadline := time.Now().Add(cfg.Timeout)
+	for {
+		rps, err := fetchRPS(side)
+		if err != nil {
+			return 0, err
+		}
+		if rps >= cfg.RPS {
+			break
+		}
+		if time.Now().After(deadline) {
+			return 0, fmt.Errorf("differential: side %s warmup RPS %.1f < floor %.0f in %v", svc.Name, rps, cfg.RPS, cfg.Timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+	drain, cancel := context.WithTimeout(ctx, cfg.Timeout)
+	defer cancel()
+	for {
+		done, err := allTerminalSvc(drain, client, svc, apiKey, svcIDs)
+		if err != nil {
+			return 0, err
+		}
+		if done {
+			return stub.Count(), nil
+		}
+		select {
+		case <-drain.Done():
+			return 0, fmt.Errorf("differential: side %s warmup did not drain in %v", svc.Name, cfg.Timeout)
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
 
 // SideResult is one scheduler's observed run: dispatch log plus the
 // run-start marker (first accepted ingest's server stamp) plus the warmup
@@ -59,7 +176,10 @@ func waitQuiesced(ctx context.Context, dsn string, stub *Stub, timeout time.Dura
 // started stub. It takes ownership of the stub and Closes it at the end,
 // returning the captured log — capture-after-teardown enforced by API, so
 // the caller (one fresh stub per run) cannot leak traffic across runs.
-func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task, stub *Stub, drainTimeout time.Duration) (SideResult, error) {
+// measureFrom slices the stub log: entries below it are the warm-up
+// pre-phase (RunWarmup's return), excluded from order, marker, and warmup
+// counts. Zero is the cold class — the whole log is the measurement.
+func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task, stub *Stub, drainTimeout time.Duration, measureFrom int) (SideResult, error) {
 	var out SideResult
 	client := &http.Client{Timeout: 10 * time.Second}
 	created := map[string]int64{}
@@ -96,6 +216,12 @@ func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task
 		if err != nil {
 			return out, err
 		}
+		// waitQuiesced counts all stub dispatches including the pre-phase;
+		// the measurement's warmup prefix starts at measureFrom.
+		warmup -= measureFrom
+		if warmup < 0 {
+			warmup = 0
+		}
 	}
 	// Drain: every submitted task terminal (or deadline → loud failure,
 	// never a silent partial comparison).
@@ -121,6 +247,16 @@ func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task
 	if err != nil {
 		return out, err
 	}
+	// Slice the pre-phase: warm-up dispatches carry synthetic IDs absent
+	// from the workload map, so slicing (not lookup-skipping) keeps the
+	// unknown-id fatal below a true invariant for the measurement.
+	if measureFrom < 0 {
+		measureFrom = 0
+	}
+	if measureFrom > len(entries) {
+		return out, fmt.Errorf("differential: side %s measure offset %d beyond %d stub entries", svc.Name, measureFrom, len(entries))
+	}
+	entries = entries[measureFrom:]
 	var order []DispatchRecord
 	seq := 0
 	for _, e := range entries {

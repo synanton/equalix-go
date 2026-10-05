@@ -123,6 +123,27 @@ func (f *fakeScheduler) dispatch(id string) {
 	}
 }
 
+// TestWarmupFromEnv pins the class knobs: unset means cold (Tasks 0,
+// historical behavior), mistyped values degrade to cold rather than a
+// half-warmed run, and the class string names the methodology.
+func TestWarmupFromEnv(t *testing.T) {
+	t.Setenv("EQUALIX_WARMUP_TASKS", "")
+	t.Setenv("EQUALIX_WARMUP_RPS", "")
+	t.Setenv("EQUALIX_WARMUP_TIMEOUT", "")
+	cfg := WarmupFromEnv()
+	if cfg.Tasks != 0 || cfg.RPS != 15 || cfg.Class() != "cold" {
+		t.Fatalf("defaults = %+v, want cold/15", cfg)
+	}
+	t.Setenv("EQUALIX_WARMUP_TASKS", "500")
+	t.Setenv("EQUALIX_WARMUP_RPS", "bogus")
+	cfg = WarmupFromEnv()
+	if cfg.Tasks != 500 || cfg.RPS != 15 || cfg.Class() != "warm-500-rps15" {
+		t.Fatalf("parsed = %+v, want warm-500 with RPS fallback", cfg)
+	}
+}
+// for a real scheduler: fresh stub, ingest with marker capture, drain to
+// terminal, Close-captured log, offset translation. The live pipeline with
+// none of the live processes.
 // TestLiveRunAgainstFakes drives RunSide end to end with fakes standing in
 // for a real scheduler: fresh stub, ingest with marker capture, drain to
 // terminal, Close-captured log, offset translation. The live pipeline with
@@ -152,7 +173,7 @@ func TestLiveRunAgainstFakes(t *testing.T) {
 		{ID: "t-a-0", Tenant: "a", Weight: 1, CreatedAtOffsetMs: 0, SubmittedAtOffsetMs: 0, PayloadBytes: 4},
 		{ID: "t-b-0", Tenant: "b", Weight: 2, CreatedAtOffsetMs: 0, SubmittedAtOffsetMs: 0, PayloadBytes: 4},
 	}
-	res, err := RunSide(ctx, svc, "k", workload, stub, 30*time.Second)
+	res, err := RunSide(ctx, svc, "k", workload, stub, 30*time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

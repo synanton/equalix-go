@@ -4,6 +4,7 @@ package differential
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -117,6 +118,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 	apiKey := "live-compare-key"
 	ctx := context.Background()
 	calibration := runCalibration(t)
+	warmCfg := WarmupFromEnv()
 
 	// Fresh state per run is established inside runOne after boot (tables
 	// exist only post-migration); residue shares keys and persists V, so
@@ -154,8 +156,16 @@ func TestLiveJavaVsGo(t *testing.T) {
 		if err := ResetDB(ctx, dsn); err != nil {
 			t.Fatalf("side %s reset: %v", name, err)
 		}
+		measureFrom := 0
+		if warmCfg.Tasks > 0 {
+			m, err := RunWarmup(ctx, &http.Client{Timeout: 10 * time.Second}, SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, APIKey: apiKey}, apiKey, workload, stub, warmCfg)
+			if err != nil {
+				t.Fatalf("side %s warmup: %v", name, err)
+			}
+			measureFrom = m
+		}
 		svc := SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, HTTPPort: 0, APIKey: apiKey}
-		res, err := RunSide(ctx, svc, apiKey, workload, stub, 180*time.Second)
+		res, err := RunSide(ctx, svc, apiKey, workload, stub, 180*time.Second, measureFrom)
 		if err != nil {
 			t.Fatalf("side %s: %v", name, err)
 		}
@@ -265,7 +275,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 		JavaPort: 18083, GoPort: 18084, Stub: DefaultLatency(),
 		MarkerJava: java.Marker, MarkerGo: goRes.Marker,
 	}
-	method := "EQLX-5 real01: w2000 (200/400/1400, 1:2:7) fixed-100ms stub, as-fast-as-possible"
+	method := "EQLX-5 real01 [" + warmCfg.Class() + "]: w2000 (200/400/1400, 1:2:7) fixed-100ms stub, as-fast-as-possible"
 	traces := tracer.Stop()
 	fetch := tracer.FetchStats()
 	for side, pts := range traces {
@@ -303,6 +313,7 @@ func TestLiveGoVsGo(t *testing.T) {
 	apiKey := "live-compare-key"
 	ctx := context.Background()
 	calibration := runCalibration(t)
+	warmCfg := WarmupFromEnv()
 	wl := os.Getenv("EQUALIX_WORKLOAD")
 	if wl == "" {
 		wl = "w127.jsonl"
@@ -357,8 +368,16 @@ func TestLiveGoVsGo(t *testing.T) {
 		if err := ResetDB(ctx, dsn); err != nil {
 			t.Fatalf("side %s reset: %v", name, err)
 		}
+		measureFrom := 0
+		if warmCfg.Tasks > 0 {
+			m, err := RunWarmup(ctx, &http.Client{Timeout: 10 * time.Second}, SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, APIKey: apiKey}, apiKey, workload, stub, warmCfg)
+			if err != nil {
+				t.Fatalf("side %s warmup: %v", name, err)
+			}
+			measureFrom = m
+		}
 		svc := SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, HTTPPort: svcPort, APIKey: apiKey}
-		res, err := RunSide(ctx, svc, apiKey, workload, stub, 180*time.Second)
+		res, err := RunSide(ctx, svc, apiKey, workload, stub, 180*time.Second, measureFrom)
 		if err != nil {
 			t.Fatalf("side %s: %v", name, err)
 		}
@@ -419,7 +438,7 @@ func TestLiveGoVsGo(t *testing.T) {
 		JavaPort: 18085, GoPort: 18086, Stub: DefaultLatency(),
 		MarkerJava: g1.Marker, MarkerGo: g2.Marker,
 	}
-	method := "EQLX-5 control: go-vs-go (go1 in java_* slots) " + wl + " fixed-100ms stub, as-fast-as-possible"
+	method := "EQLX-5 control [" + warmCfg.Class() + "]: go-vs-go (go1 in java_* slots) " + wl + " fixed-100ms stub, as-fast-as-possible"
 	traces := tracer.Stop()
 	fetch := tracer.FetchStats()
 	for side, pts := range traces {
