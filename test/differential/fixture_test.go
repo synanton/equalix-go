@@ -17,6 +17,10 @@ import (
 // goroutines in live runs mutate only through Save (which copies). Never
 // mutate a returned pointer in place — that is the pointer-aliasing race
 // class (copy-on-read rule); the fake would hand out shared mutable state.
+// Enforcement is mechanical, not conventional: every test exercising these
+// fakes runs under -race in CI, and a mutating decorator fails the suite.
+// A rule without that sentence would be folklore; with it, the detector is
+// the enforcer.
 type stubInner struct {
 	tasks []*domain.Task
 }
