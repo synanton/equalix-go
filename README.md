@@ -33,6 +33,9 @@ JvG 0/5 fails vs GvG 0/5 fails, within one-run slack).
 
 #### Differential dimensions (gate-level)
 
+Run-level evidence: [`docs/evidence/eqlx-5-warm-class.md`](docs/evidence/eqlx-5-warm-class.md)
+(20-run matrix; raw `results.json` retained 90 days per CI run).
+
 The differential column above is per-area; gates differ in what "validated"
 can mean. Fairness, order, and quota compare Go-to-Java on mechanisms Java
 has. Starvation splits in two:

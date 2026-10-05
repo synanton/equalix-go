@@ -85,7 +85,7 @@ jobs:
               psql -U cmp -d equalix_go -q -f /tmp/mig.sql
           done
 
-      - name: Run comparison
+      - name: Run Java-vs-Go comparison
         working-directory: equalix-go
         env:
           EQUALIX_LIVE_COMPARE: "1"
@@ -96,7 +96,7 @@ jobs:
           EQUALIX_GO_DSN2: postgres://cmp:x@localhost:5433/equalix_go2?sslmode=disable
           EQUALIX_PG_USER: cmp
           EQUALIX_PG_PASSWORD: x
-          EQUALIX_RESULTS_DIR: ${{ github.workspace }}/results
+          EQUALIX_RESULTS_DIR: ${{ github.workspace }}/results-jvg
           EQUALIX_JAVA_SHA: ${{ inputs.java_sha }}
           EQUALIX_GO_SHA: ${{ github.sha }}
           # Generous startup on cold runners (Maven + Spring boot from
@@ -105,12 +105,35 @@ jobs:
           EQUALIX_JAVA_STARTUP_TIMEOUT: 5m
           EQUALIX_GO_STARTUP_TIMEOUT: 2m
         run: |
-          go test -count=1 -tags=differential -run 'TestLiveJavaVsGo|TestLiveGoVsGo' \
-            ./test/differential/... 2>&1 | tee compare.log; test ${PIPESTATUS[0]} -eq 0
+          go test -count=1 -tags=differential -run 'TestLiveJavaVsGo' \
+            ./test/differential/... 2>&1 | tee compare-jvg.log; test ${PIPESTATUS[0]} -eq 0
+
+      - name: Run Go-vs-Go control
+        working-directory: equalix-go
+        env:
+          EQUALIX_LIVE_COMPARE: "1"
+          EQUALIX_GO_BIN: /tmp/equalix-go
+          EQUALIX_GO_DSN: postgres://cmp:x@localhost:5433/equalix_go?sslmode=disable
+          EQUALIX_GO_DSN2: postgres://cmp:x@localhost:5433/equalix_go2?sslmode=disable
+          EQUALIX_PG_USER: cmp
+          EQUALIX_PG_PASSWORD: x
+          EQUALIX_RESULTS_DIR: ${{ github.workspace }}/results-gvg
+          EQUALIX_GO_SHA: ${{ github.sha }}
+          EQUALIX_GO_STARTUP_TIMEOUT: 2m
+        run: |
+          go test -count=1 -tags=differential -run 'TestLiveGoVsGo' \
+            ./test/differential/... 2>&1 | tee compare-gvg.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Publish results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: differential-results
-          path: results/
+          # Standing retention property: every run leaves a durable
+          # results.json per pair (90 days). Separate dirs per leg —
+          # both legs previously shared one dir and the control
+          # overwrote the comparison's artifact.
+          name: differential-results-${{ github.run_number }}-${{ github.sha }}
+          retention-days: 90
+          path: |
+            results-jvg/
+            results-gvg/
