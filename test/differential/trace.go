@@ -140,6 +140,27 @@ func (t *Tracer) FirstErrors() map[string]string {
 	return out
 }
 
+// LiveStats summarizes the successful /status reads in pts: -1 is "no
+// reading" (service down, or fetch failed — see FirstErrors), never a
+// throttle value. Reporting first→last over raw endpoints misleads on
+// sequential runs — the second side's early -1s are pre-boot, the first
+// side's trailing -1s post-stop (ctl-jg2: both sides read "-1→live"
+// while mid-run reads on both were healthy, 1.1→20+). The live range is
+// the signal; endpoints are scheduling artifacts of the harness itself.
+func LiveStats(pts []TracePoint) (live int, first, last float64) {
+	for _, p := range pts {
+		if p.RPS == -1 {
+			continue
+		}
+		if live == 0 {
+			first = p.RPS
+		}
+		last = p.RPS
+		live++
+	}
+	return live, first, last
+}
+
 // Stop ends sampling and returns the series. Call after drain, before
 // WriteResult; the map is a copy, safe to marshal.
 func (t *Tracer) Stop() map[string][]TracePoint {

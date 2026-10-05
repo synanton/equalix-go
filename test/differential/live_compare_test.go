@@ -267,18 +267,21 @@ func TestLiveJavaVsGo(t *testing.T) {
 	}
 	method := "EQLX-5 real01: w2000 (200/400/1400, 1:2:7) fixed-100ms stub, as-fast-as-possible"
 	traces := tracer.Stop()
+	firstErr := tracer.FirstErrors()
 	for side, pts := range traces {
 		if len(pts) > 0 {
-			t.Logf("trace %s: %d samples, rps %.1f→%.1f, dispatched %d, promoted %d",
-				side, len(pts), pts[0].RPS, pts[len(pts)-1].RPS,
+			live, first, last := LiveStats(pts)
+			t.Logf("trace %s: %d samples (%d live, rps %.1f→%.1f), dispatched %d, promoted %d",
+				side, len(pts), live, first, last,
 				pts[len(pts)-1].Dispatched, pts[len(pts)-1].Promoted)
 		}
 	}
-	for side, firstErr := range tracer.FirstErrors() {
-		t.Logf("trace %s first status error: %s", side, firstErr)
+	for side, err := range firstErr {
+		t.Logf("trace %s first status error: %s", side, err)
 	}
 	if err := WriteResult(outDir, method,
-		resolved, shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), shaOr("EQUALIX_GO_SHA", "go-unrecorded"), calibration, traces, mm); err != nil {
+		resolved, shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), shaOr("EQUALIX_GO_SHA", "go-unrecorded"), calibration, traces, firstErr,
+		map[string]int{"java": java.Warmup, "go": goRes.Warmup}, mm); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("java shares: %s", summarize(java.Log))
@@ -299,6 +302,7 @@ func TestLiveGoVsGo(t *testing.T) {
 	}
 	apiKey := "live-compare-key"
 	ctx := context.Background()
+	calibration := runCalibration(t)
 	wl := os.Getenv("EQUALIX_WORKLOAD")
 	if wl == "" {
 		wl = "w127.jsonl"
@@ -315,6 +319,13 @@ func TestLiveGoVsGo(t *testing.T) {
 	if goDSN == "" {
 		t.Skip("EQUALIX_GO_DSN not set")
 	}
+	// Traced like the Java-vs-Go leg: the control protocol compares
+	// divergence RATES across pairs, which needs traces per run on both
+	// legs — an untraced control run contributes no attributable evidence.
+	tracer := StartTracer(ctx, map[string]Side{
+		"go1": {Name: "go1", BaseURL: "http://127.0.0.1:18085", DSN: goDSN, APIKey: apiKey},
+		"go2": {Name: "go2", BaseURL: "http://127.0.0.1:18086", DSN: dsn2, APIKey: apiKey},
+	}, apiKey)
 	// No pre-launch reset here: the GoVsGo sides reset inside runGo after
 	// boot (same reason as above — tables exist only post-migration).
 	runGo := func(name, svcURL string, svcPort, stubPort int, dsn string) SideResult {
@@ -355,10 +366,29 @@ func TestLiveGoVsGo(t *testing.T) {
 	}
 	g1 := runGo("go1", "http://127.0.0.1:18085", 18085, 18095, os.Getenv("EQUALIX_GO_DSN"))
 	g2 := runGo("go2", "http://127.0.0.1:18086", 18086, 18096, dsn2)
-	s1 := sharesOf(g1)
-	s2 := sharesOf(g2)
-	t.Logf("go1 shares: %v warmup=%d", s1, g1.Warmup)
-	t.Logf("go2 shares: %v warmup=%d", s2, g2.Warmup)
+	// Shares gate, same rule as the Java-vs-Go leg: full 1000-windows only,
+	// mismatches recorded into the artifact, verdict after WriteResult.
+	var mm *Mismatch
+	for _, side := range []struct {
+		name string
+		log  RunLog
+	}{{"go1", g1.Log}, {"go2", g2.Log}} {
+		results, m := CompareShares(side.log, 1000, 2)
+		if FullWindows(results) == 0 {
+			t.Logf("%s shares recorded (no full window — gate not applied): %s", side.name, summarize(side.log))
+			continue
+		}
+		if m != nil && mm == nil {
+			mm = m
+		}
+		for _, w := range results {
+			if w.Full {
+				t.Logf("%s window %d deviations: %v (bound ±2)", side.name, w.Window, w.Deviations)
+			}
+		}
+	}
+	t.Logf("go1 shares: %v warmup=%d", sharesOf(g1), g1.Warmup)
+	t.Logf("go2 shares: %v warmup=%d", sharesOf(g2), g2.Warmup)
 	if mm := ComparePair(g1.Log, g2.Log, 1000, 2, "fairness-shares"); mm != nil {
 		t.Logf("GO-VS-GO DIVERGENCE (identical binaries): %v", mm)
 	} else {
@@ -375,6 +405,42 @@ func TestLiveGoVsGo(t *testing.T) {
 		t.Logf("GO-VS-GO STEADY DIVERGENCE: %v", mm)
 	} else {
 		t.Logf("GO-VS-GO STEADY: exact parity")
+	}
+	// Retained artifact, same contract as the Java-vs-Go leg: the control
+	// rate is computed across runs from results.json, so every control run
+	// publishes — especially the diverged ones. Resolved reuses the
+	// java_*/go_* slots for go1/go2 (methodology names the mapping).
+	outDir := os.Getenv("EQUALIX_RESULTS_DIR")
+	if outDir == "" {
+		outDir = "results-live-gvg01"
+	}
+	resolved := &Resolved{
+		JavaDSN: redact(goDSN), GoDSN: redact(dsn2),
+		JavaPort: 18085, GoPort: 18086, Stub: DefaultLatency(),
+		MarkerJava: g1.Marker, MarkerGo: g2.Marker,
+	}
+	method := "EQLX-5 control: go-vs-go (go1 in java_* slots) " + wl + " fixed-100ms stub, as-fast-as-possible"
+	traces := tracer.Stop()
+	firstErr := tracer.FirstErrors()
+	for side, pts := range traces {
+		if len(pts) > 0 {
+			live, first, last := LiveStats(pts)
+			t.Logf("trace %s: %d samples (%d live, rps %.1f→%.1f), dispatched %d, promoted %d",
+				side, len(pts), live, first, last,
+				pts[len(pts)-1].Dispatched, pts[len(pts)-1].Promoted)
+		}
+	}
+	for side, err := range firstErr {
+		t.Logf("trace %s first status error: %s", side, err)
+	}
+	goSHA := shaOr("EQUALIX_GO_SHA", "go-unrecorded")
+	if err := WriteResult(outDir, method,
+		resolved, goSHA, goSHA, calibration, traces, firstErr,
+		map[string]int{"go1": g1.Warmup, "go2": g2.Warmup}, mm); err != nil {
+		t.Fatal(err)
+	}
+	if mm != nil {
+		t.Fatalf("GO-VS-GO DIVERGENCE (recorded above): %v", mm)
 	}
 }
 
