@@ -10,12 +10,15 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -28,6 +31,7 @@ import (
 	"github.com/synanton/equalix-go/internal/adaptive"
 	"github.com/synanton/equalix-go/internal/domain"
 	"github.com/synanton/equalix-go/internal/jobs"
+	"github.com/synanton/equalix-go/migrations"
 	"github.com/synanton/equalix-go/pkg/cms"
 	"gopkg.in/yaml.v3"
 )
@@ -58,7 +62,7 @@ func runHealthcheck(args []string) int {
 		probeAddr = v
 	}
 	addr := fs.String("addr", probeAddr, "service address to probe")
-	path := fs.String("path", "/healthz", "mux path expecting HTTP 200 (liveness only; use /readyz once GAP-5 lands it)")
+	path := fs.String("path", "/readyz", "mux path expecting HTTP 200 (readiness: Docker HEALTHCHECK is a readiness proxy for Docker/Swarm users; k8s users ignore HEALTHCHECK and use livenessProbe /healthz + readinessProbe /readyz)")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -240,6 +244,48 @@ func resolveSettings(set map[string]bool, fl settings, getenv func(string) strin
 	return out, nil
 }
 
+// countMigrationFiles returns the number of .sql files in the embedded
+// set (or the override dir): the "migrations applied" denominator for
+// /readyz. Unreadable source fails startup — a readiness precondition
+// that cannot be evaluated is a wiring bug, not a 503.
+func countMigrationFiles(dir string) (int, error) {
+	if dir == "" {
+		entries, err := fs.ReadDir(migrations.FS, ".")
+		if err != nil {
+			return 0, fmt.Errorf("embedded migrations unreadable: %w", err)
+		}
+		return countSQL(entries), nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, fmt.Errorf("migrations dir %s: %w", dir, err)
+	}
+	return countSQL(entries), nil
+}
+
+func countSQL(entries []fs.DirEntry) int {
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			n++
+		}
+	}
+	return n
+}
+
+// migrationsApplied reports whether the goose version table covers every
+// known migration file (applied versions, excluding goose's own baseline
+// row, >= file count). Partial application reads as not-ready, never as
+// ready-with-fewer — a half-migrated schema must not serve traffic.
+func migrationsApplied(ctx context.Context, pool *pgxpool.Pool, expected int) (bool, error) {
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM goose_db_version WHERE is_applied AND version_id > 0`).Scan(&n); err != nil {
+		return false, err
+	}
+	return n >= expected && expected > 0, nil
+}
+
 func run() error {
 	// Startup milestones feed the differential matrix's
 	// runtime-characterization row (informational, never gated):
@@ -345,12 +391,43 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("adaptive controller: %w", err)
 	}
+	// Readiness drain flag: flipped true the instant SIGTERM arrives
+	// (before HTTP drain begins), so /readyz 503s while in-flight
+	// requests still complete. /healthz stays 200 throughout — liveness
+	// must not restart a deliberately-draining pod.
+	draining := &atomic.Bool{}
+	// Expected migration count is pinned at boot (not per probe): the
+	// file set cannot change under a running binary, and an unreadable
+	// migrations source is a wiring bug that must fail startup, not
+	// flap readiness per probe.
+	expectedMigrations, err := countMigrationFiles(s.MigrationsDir)
+	if err != nil {
+		return err
+	}
 	handler := chiadapter.NewRouter(chiadapter.Deps{
 		Tasks: stores.Tasks, Counts: stores.Counts, Sequences: stores.Sequences,
 		CMS: cmsketch, Metrics: metrics,
 		MetricsPath: s.MetricsPath, MetricsHandler: metrics.Handler(),
 		RPS: controller, Throttle: controller, Clock: domain.SystemClock{},
 		APIKey: s.APIKey, MaxPayloadBytes: s.MaxPayload,
+		Draining: draining,
+		Ping: func(ctx context.Context) error {
+			return pool.Ping(ctx)
+		},
+		CheckLock: func(ctx context.Context) error {
+			ok, release, err := locker.Lock(ctx, "readiness-probe")
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("readiness: lock probe denied")
+			}
+			release()
+			return nil
+		},
+		CheckMigrated: func(ctx context.Context) (bool, error) {
+			return migrationsApplied(ctx, pool, expectedMigrations)
+		},
 	})
 
 	probes := []func(ctx context.Context) error{
@@ -459,12 +536,16 @@ func run() error {
 		_ = server.Shutdown(grace)
 		return err
 	case <-ctx.Done():
-		// Signal: strictly sequential drain — (1) stop accepting + wait
-		// for in-flight HTTP within grace, (2) then runner drain. The two
-		// phases share the grace budget sequentially, never in parallel:
-		// a webhook accepted during HTTP drain must find the stores (and
-		// CMS flush path) still owned by a live runner, not torn down
-		// underneath it. Runner normalizes shutdown cancels to nil.
+		// Signal: drain flag FIRST, then the strictly sequential drain —
+		// (1) /readyz flips 503 so the orchestrator removes the pod from
+		// service endpoints while (2) in-flight HTTP completes within
+		// grace, (3) then runner drain. The two drain phases share the
+		// grace budget sequentially, never in parallel: a webhook accepted
+		// during HTTP drain must find the stores (and CMS flush path)
+		// still owned by a live runner, not torn down underneath it.
+		// /healthz stays 200 throughout (liveness, not readiness).
+		// Runner normalizes shutdown cancels to nil.
+		draining.Store(true)
 		grace, cancel := context.WithTimeout(context.Background(), cfg.ShutdownGrace)
 		defer cancel()
 		if err := server.Shutdown(grace); err != nil {

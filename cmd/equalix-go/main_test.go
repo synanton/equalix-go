@@ -144,7 +144,7 @@ func TestMigrateKnobPrecedence(t *testing.T) {
 // /healthz path, explicit wrong path, and refused connection.
 func TestHealthcheck(t *testing.T) {
 	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
+		if r.URL.Path != "/readyz" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}

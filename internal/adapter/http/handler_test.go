@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -250,23 +252,84 @@ type fixture struct {
 	cms     *fakeCMS
 	metrics *fakeMetrics
 	clock   *domain.FakeClock
+	// draining + readiness funcs are reachable so state-transition tests
+	// drive the same router through starting → ready → draining.
+	draining *atomic.Bool
+	pingErr  error
+	lockErr  error
+	migrated bool
+	migErr   error
 }
 
 func newFixture() *fixture {
 	fx := &fixture{
-		tasks:   &fakeTasks{tasks: map[string]*domain.Task{}},
-		counts:  &fakeCounts{m: map[string]int{}},
-		seqs:    &fakeSeqs{m: map[string]*domain.SequenceState{}},
-		cms:     &fakeCMS{m: map[string]int64{}},
-		metrics: &fakeMetrics{},
-		clock:   domain.NewFakeClock(time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)),
+		tasks:    &fakeTasks{tasks: map[string]*domain.Task{}},
+		counts:   &fakeCounts{m: map[string]int{}},
+		seqs:     &fakeSeqs{m: map[string]*domain.SequenceState{}},
+		cms:      &fakeCMS{m: map[string]int64{}},
+		metrics:  &fakeMetrics{},
+		clock:    domain.NewFakeClock(time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)),
+		draining: &atomic.Bool{},
+		migrated: true,
 	}
 	fx.router = NewRouter(Deps{
 		Tasks: fx.tasks, Counts: fx.counts, Sequences: fx.seqs, CMS: fx.cms,
 		Metrics: fx.metrics, RPS: fakeRPS{rps: 8.5}, Clock: fx.clock,
 		APIKey: "changeme", MaxPayloadBytes: 1024,
+		Draining:  fx.draining,
+		Ping:      func(context.Context) error { return fx.pingErr },
+		CheckLock: func(context.Context) error { return fx.lockErr },
+		CheckMigrated: func(context.Context) (bool, error) {
+			return fx.migrated, fx.migErr
+		},
 	})
 	return fx
+}
+
+// TestReadyzStateMachine walks one router through starting → ready →
+// draining, asserting the pinned codes at each state: 503 naming the
+// failed check, 200 only when everything passes and no drain runs,
+// 503 on drain even with healthy dependencies, and /healthz 200 in
+// every state (liveness, never readiness).
+func TestReadyzStateMachine(t *testing.T) {
+	fx := newFixture()
+	get := func(path string) (int, string) {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		fx.router.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+	// Starting: DB down.
+	fx.pingErr = errors.New("dial refused")
+	if code, body := get("/readyz"); code != http.StatusServiceUnavailable || !strings.Contains(body, `"check":"db"`) {
+		t.Fatalf("db-down = %d %s, want 503 naming db", code, body)
+	}
+	// Lock probe failing.
+	fx.pingErr = nil
+	fx.lockErr = errors.New("denied")
+	if code, body := get("/readyz"); code != http.StatusServiceUnavailable || !strings.Contains(body, `"check":"lock"`) {
+		t.Fatalf("lock-down = %d %s, want 503 naming lock", code, body)
+	}
+	// Migrations pending.
+	fx.lockErr = nil
+	fx.migrated = false
+	if code, body := get("/readyz"); code != http.StatusServiceUnavailable || !strings.Contains(body, `"check":"migrations"`) {
+		t.Fatalf("unmigrated = %d %s, want 503 naming migrations", code, body)
+	}
+	// Ready: everything passes, no drain.
+	fx.migrated = true
+	if code, body := get("/readyz"); code != http.StatusOK || !strings.Contains(body, `"ok":true`) {
+		t.Fatalf("ready = %d %s, want 200 ok:true", code, body)
+	}
+	// Draining: healthy dependencies, still 503 naming drain.
+	fx.draining.Store(true)
+	if code, body := get("/readyz"); code != http.StatusServiceUnavailable || !strings.Contains(body, `"check":"draining"`) {
+		t.Fatalf("draining = %d %s, want 503 naming draining", code, body)
+	}
+	// Liveness holds 200 in every state, including drain.
+	if code, _ := get("/healthz"); code != http.StatusOK {
+		t.Fatalf("healthz during drain = %d, want 200", code)
+	}
 }
 
 // TestHealthzIsUnauthenticatedLiveness pins the minimal contract:
@@ -301,6 +364,10 @@ func TestMetricsEndpointServesRegistry(t *testing.T) {
 		Clock:  domain.NewFakeClock(time.Now()),
 		APIKey: "changeme", MaxPayloadBytes: 1024,
 		MetricsPath: "/metrics", MetricsHandler: pm.Handler(),
+		Draining:      &atomic.Bool{},
+		Ping:          func(context.Context) error { return nil },
+		CheckLock:     func(context.Context) error { return nil },
+		CheckMigrated: func(context.Context) (bool, error) { return true, nil },
 	})
 	pm.RecordDispatch("a")
 	pm.SetRPS(9.25)

@@ -322,8 +322,8 @@ gauges. Java reference metrics (`/actuator/prometheus`):
 
 ### Endpoints
 
-- `GET /healthz` — liveness
-- `GET /readyz` — readiness
+- `GET /healthz` — liveness (200 while serving, including drain)
+- `GET /readyz` — readiness (DB ping, lock probe, migrations applied; 503 on failure or drain)
 - `GET /metrics` — Prometheus metrics
 
 ### Logging

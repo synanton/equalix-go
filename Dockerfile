@@ -14,12 +14,12 @@
 # user 65532. No HEALTHCHECK shell available, so the healthcheck
 # subcommand (same binary) serves docker --health-cmd and k8s probes.
 #
-# Health signal (pinned): /healthz liveness, NOT /metrics — the exporter
-# serves 200 with a dead DB, which would report a broken container
-# healthy. /healthz stays 200 through shutdown drain by construction
+# Health signal (pinned): the HEALTHCHECK default path is /readyz — a
+# readiness proxy for Docker/Swarm users (container shows unhealthy on
+# DB outage, which is honest). k8s users ignore HEALTHCHECK entirely
+# and use livenessProbe: /healthz + readinessProbe: /readyz.
+# /healthz stays 200 through shutdown drain by construction
 # (k8s-safe: liveness must not restart a deliberately-draining pod).
-# TODO(GAP-5): repoint the healthcheck --path to /readyz once
-# the readiness endpoint (DB, locks, migrations, shutdown drain) lands.
 
 ARG GO_VERSION=1.22
 
