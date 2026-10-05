@@ -169,6 +169,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 		if err != nil {
 			t.Fatalf("side %s: %v", name, err)
 		}
+		res.SpawnedAt, res.ReadyAt = proc.SpawnedAt, proc.ReadyAt
 		return res
 	}
 
@@ -289,9 +290,17 @@ func TestLiveJavaVsGo(t *testing.T) {
 	for side, st := range fetch {
 		t.Logf("trace %s status fetch: %d missed, first: %s, last: %s", side, st.Failed, st.First, st.Last)
 	}
-	if err := WriteResult(outDir, method,
-		resolved, shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), shaOr("EQUALIX_GO_SHA", "go-unrecorded"), calibration, traces, fetch,
-		map[string]int{"java": java.Warmup, "go": goRes.Warmup}, mm); err != nil {
+	startup := map[string]StartupInfo{
+		"java": NewStartup(java.SpawnedAt, java.ReadyAt, java.FirstDispatch),
+		"go":   NewStartup(goRes.SpawnedAt, goRes.ReadyAt, goRes.FirstDispatch),
+	}
+	for side, st := range startup {
+		t.Logf("startup %s: spawn→ready %.0fms, ready→first-dispatch %.0fms",
+			side, st.SpawnToReadyMs, st.ReadyToFirstDispatchMs)
+	}
+	if err := WriteResult(Artifact{Dir: outDir, Method: method,
+		Resolved: resolved, JavaSHA: shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), GoSHA: shaOr("EQUALIX_GO_SHA", "go-unrecorded"), Calibration: calibration, Traces: traces, Fetch: fetch,
+		Warmup: map[string]int{"java": java.Warmup, "go": goRes.Warmup}, Startup: startup, MM: mm}); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("java shares: %s", summarize(java.Log))
@@ -381,6 +390,7 @@ func TestLiveGoVsGo(t *testing.T) {
 		if err != nil {
 			t.Fatalf("side %s: %v", name, err)
 		}
+		res.SpawnedAt, res.ReadyAt = proc.SpawnedAt, proc.ReadyAt
 		return res
 	}
 	g1 := runGo("go1", "http://127.0.0.1:18085", 18085, 18095, os.Getenv("EQUALIX_GO_DSN"))
@@ -453,9 +463,17 @@ func TestLiveGoVsGo(t *testing.T) {
 		t.Logf("trace %s status fetch: %d missed, first: %s, last: %s", side, st.Failed, st.First, st.Last)
 	}
 	goSHA := shaOr("EQUALIX_GO_SHA", "go-unrecorded")
-	if err := WriteResult(outDir, method,
-		resolved, goSHA, goSHA, calibration, traces, fetch,
-		map[string]int{"go1": g1.Warmup, "go2": g2.Warmup}, mm); err != nil {
+	startup := map[string]StartupInfo{
+		"go1": NewStartup(g1.SpawnedAt, g1.ReadyAt, g1.FirstDispatch),
+		"go2": NewStartup(g2.SpawnedAt, g2.ReadyAt, g2.FirstDispatch),
+	}
+	for side, st := range startup {
+		t.Logf("startup %s: spawn→ready %.0fms, ready→first-dispatch %.0fms",
+			side, st.SpawnToReadyMs, st.ReadyToFirstDispatchMs)
+	}
+	if err := WriteResult(Artifact{Dir: outDir, Method: method,
+		Resolved: resolved, JavaSHA: goSHA, GoSHA: goSHA, Calibration: calibration, Traces: traces, Fetch: fetch,
+		Warmup: map[string]int{"go1": g1.Warmup, "go2": g2.Warmup}, Startup: startup, MM: mm}); err != nil {
 		t.Fatal(err)
 	}
 	if mm != nil {

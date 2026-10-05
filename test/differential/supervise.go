@@ -26,10 +26,15 @@ type ProcSpec struct {
 	StartupTimeout time.Duration
 }
 
-// Proc is a supervised child process.
+// Proc is a supervised child process. SpawnedAt/ReadyAt feed the
+// results.json startup section: T0 = spawn, T1 = first HTTP response on
+// the readiness URL (any status — even 401 — counts as alive; the gate is
+// "socket accepting and routing", readiness semantics stay per-side).
 type Proc struct {
 	spec ProcSpec
 	cmd  *exec.Cmd
+	SpawnedAt time.Time
+	ReadyAt   time.Time
 }
 
 // Launch starts the process and waits for readiness. Failure names the
@@ -46,10 +51,11 @@ func Launch(ctx context.Context, spec ProcSpec) (*Proc, error) {
 	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	spawned := time.Now()
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("differential: start %s: %w", spec.Name, err)
 	}
-	p := &Proc{spec: spec, cmd: cmd}
+	p := &Proc{spec: spec, cmd: cmd, SpawnedAt: spawned}
 	deadline := time.Now().Add(spec.StartupTimeout)
 	client := &http.Client{Timeout: 2 * time.Second}
 	for {
@@ -60,6 +66,7 @@ func Launch(ctx context.Context, spec ProcSpec) (*Proc, error) {
 		}
 		if resp, err := client.Do(req); err == nil {
 			resp.Body.Close()
+			p.ReadyAt = time.Now()
 			return p, nil // any HTTP response = alive (even 401/404)
 		}
 		if time.Now().After(deadline) {

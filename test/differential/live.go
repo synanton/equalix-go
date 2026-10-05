@@ -135,11 +135,16 @@ func RunWarmup(ctx context.Context, client *http.Client, svc SideConfig, apiKey 
 // run-start marker (first accepted ingest's server stamp) plus the warmup
 // prefix length (dispatches that fired before calculator quiescence —
 // startup transient, excluded from ordering comparison, included in
-// shares per the scope's window rule).
+// shares per the scope's window rule). SpawnedAt/ReadyAt are the harness
+// T0/T1 (process spawn, first readiness-URL response); FirstDispatch is
+// T2 (first stub dispatch receive time, zero when nothing dispatched).
 type SideResult struct {
 	Log    RunLog
 	Marker time.Time
 	Warmup int
+	SpawnedAt time.Time
+	ReadyAt   time.Time
+	FirstDispatch time.Time
 }
 
 // waitQuiesced polls until no RECEIVED rows remain (calculator drained)
@@ -258,6 +263,9 @@ func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task
 	}
 	entries = entries[measureFrom:]
 	var order []DispatchRecord
+	if len(entries) > 0 {
+		out.FirstDispatch = entries[0].Received
+	}
 	seq := 0
 	for _, e := range entries {
 		wid, ok := svcToWorkload[e.ID]
@@ -394,6 +402,38 @@ type TracePoint struct {
 	Promoted   int       `json:"promoted"`
 }
 
+// StartupInfo is one side's spawn → ready → first-dispatch record: the
+// matrix's runtime-characterization row (informational, never gated).
+// T0/T1 are harness-measured (process spawn, first readiness-URL HTTP
+// response); T2 is the first stub dispatch receive time. Service-side
+// stdout milestones (main entry, context built, client wired) give the
+// internal phase breakdown when a cell needs drill-down; the harness does
+// not parse them (interleaved child stdout is not a data channel).
+// Cold-vs-warm JVM cache must be declared alongside any Java cell:
+// page-cache-warm starts run 2–3x faster, and CI runners are warm.
+type StartupInfo struct {
+	Spawn        time.Time `json:"spawn"`
+	Ready        time.Time `json:"ready"`
+	FirstDispatch time.Time `json:"first_dispatch"`
+	// Derived phase durations, milliseconds.
+	SpawnToReadyMs       float64 `json:"spawn_to_ready_ms"`
+	ReadyToFirstDispatchMs float64 `json:"ready_to_first_dispatch_ms"`
+}
+
+// NewStartup builds the record plus its phase durations. Zero times (side
+// never became ready / never dispatched) yield zero durations, not
+// garbage: a missing phase must read as missing.
+func NewStartup(spawn, ready, first time.Time) StartupInfo {
+	out := StartupInfo{Spawn: spawn, Ready: ready, FirstDispatch: first}
+	if !spawn.IsZero() && !ready.IsZero() {
+		out.SpawnToReadyMs = float64(ready.Sub(spawn).Milliseconds())
+	}
+	if !ready.IsZero() && !first.IsZero() {
+		out.ReadyToFirstDispatchMs = float64(first.Sub(ready).Milliseconds())
+	}
+	return out
+}
+
 // Result is the published artifact for one comparison.
 type Result struct {
 	Resolved Resolved `json:"resolved"`
@@ -412,25 +452,45 @@ type Result struct {
 	// Warmup records the quiescence-prefix length per side: ordering
 	// diagnostics without it cannot separate transient from steady state.
 	Warmup map[string]int `json:"warmup,omitempty"`
-	Pass   bool           `json:"pass"`
-	Mismatch    *Mismatch               `json:"mismatch,omitempty"`
+	// Startup holds the per-side spawn → ready → first-dispatch record:
+	// runtime characterization for the matrix, never an acceptance input.
+	Startup map[string]StartupInfo `json:"startup,omitempty"`
+	Pass    bool                   `json:"pass"`
+	Mismatch *Mismatch            `json:"mismatch,omitempty"`
+}
+
+// Artifact is the full WriteResult input: eleven positional params proved
+// to be a readability cliff, so the published-artifact fields travel as
+// one struct. Callers fill what their leg measures.
+type Artifact struct {
+	Dir         string
+	Method      string
+	Resolved    *Resolved
+	JavaSHA     string
+	GoSHA       string
+	Calibration []string
+	Traces      map[string][]TracePoint
+	Fetch       map[string]fetchStat
+	Warmup      map[string]int
+	Startup     map[string]StartupInfo
+	MM          *Mismatch
 }
 
 // WriteResult publishes results.json plus methodology.md into dir: dual
 // SHAs attribute the build, resolved config attributes the run, traces
 // attribute timing (empty map when tracing was disabled).
-func WriteResult(dir, methodology string, resolved *Resolved, javaSHA, goSHA string, calibration []string, traces map[string][]TracePoint, fetch map[string]fetchStat, warmup map[string]int, mm *Mismatch) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+func WriteResult(a Artifact) error {
+	if err := os.MkdirAll(a.Dir, 0o755); err != nil {
 		return err
 	}
-	res := Result{Resolved: *resolved, Method: methodology, Traces: traces, Calibration: calibration, StatusFetch: fetch, Warmup: warmup, Pass: mm == nil, Mismatch: mm}
+	res := Result{Resolved: *a.Resolved, Method: a.Method, Traces: a.Traces, Calibration: a.Calibration, StatusFetch: a.Fetch, Warmup: a.Warmup, Startup: a.Startup, Pass: a.MM == nil, Mismatch: a.MM}
 	raw, err := json.MarshalIndent(res, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "results.json"), raw, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(a.Dir, "results.json"), raw, 0o600); err != nil {
 		return err
 	}
-	doc := "# Methodology\n\n" + methodology + "\n\nJava: " + javaSHA + "\nGo: " + goSHA + "\n"
-	return os.WriteFile(filepath.Join(dir, "methodology.md"), []byte(doc), 0o600)
+	doc := "# Methodology\n\n" + a.Method + "\n\nJava: " + a.JavaSHA + "\nGo: " + a.GoSHA + "\n"
+	return os.WriteFile(filepath.Join(a.Dir, "methodology.md"), []byte(doc), 0o600)
 }
