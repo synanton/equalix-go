@@ -27,8 +27,8 @@ type Tracer struct {
 	// "connection refused" and closed the case wrongly). Failed counts
 	// every miss; Last names the most recent cause.
 	fetchStat map[string]*fetchStat
-	cancel context.CancelFunc
-	done   chan struct{}
+	cancel    context.CancelFunc
+	done      chan struct{}
 }
 
 // fetchStat is the per-side /status fetch record: miss count plus first

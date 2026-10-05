@@ -76,10 +76,12 @@ func NewRouter(d Deps) http.Handler {
 		r.Handle(d.MetricsPath, d.MetricsHandler)
 	}
 	// Minimal liveness: 200 while the mux serves, outside auth (probes
-	// carry no API keys). This is NOT readiness — DB, locks, and
-	// migrations are not checked here. Full liveness/readiness
-	// semantics (503 on shutdown drain, /readyz with dependency checks)
-	// land with GAP-5; the healthcheck subcommand repoints there then.
+	// carry no API keys). Stays 200 through shutdown drain by
+	// construction (chi serves until Shutdown returns) — do NOT flip it
+	// to 503 on drain: that is readiness leaking into liveness, and k8s
+	// would restart a pod that is deliberately shutting down. Traffic
+	// removal is /readyz's job (GAP-5). This is NOT readiness — DB,
+	// locks, and migrations are not checked here.
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})

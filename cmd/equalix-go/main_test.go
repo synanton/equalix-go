@@ -107,6 +107,41 @@ func TestLoadFileConfig(t *testing.T) {
 	}
 }
 
+func TestMigrateKnobPrecedence(t *testing.T) {
+	// Default off everywhere: opt-in, never accidental.
+	got, err := resolveSettings(map[string]bool{}, settings{}, getenvOf(nil), fileConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MigrateOnStartup || got.MigrationsDir != "" {
+		t.Fatalf("migrate defaults wrong: %+v", got)
+	}
+	// Env enables.
+	got, err = resolveSettings(map[string]bool{}, settings{},
+		getenvOf(map[string]string{"EQUALIX_MIGRATE_ON_STARTUP": "true"}), fileConfig{})
+	if err != nil || !got.MigrateOnStartup {
+		t.Fatalf("env did not enable: %+v %v", got, err)
+	}
+	// Explicit flag false vetoes env true AND file true simultaneously.
+	fileTrue := true
+	got, err = resolveSettings(map[string]bool{"migrate-on-startup": true},
+		settings{MigrateOnStartup: false},
+		getenvOf(map[string]string{"EQUALIX_MIGRATE_ON_STARTUP": "true"}),
+		fileConfig{MigrateOnStartup: &fileTrue})
+	if err != nil || got.MigrateOnStartup {
+		t.Fatalf("explicit false did not veto all sources: %+v %v", got, err)
+	}
+	// File enables and carries the external dir.
+	tr := true
+	got, err = resolveSettings(map[string]bool{}, settings{}, getenvOf(nil),
+		fileConfig{MigrateOnStartup: &tr, MigrationsDir: strp("/srv/sql")})
+	if err != nil || !got.MigrateOnStartup || got.MigrationsDir != "/srv/sql" {
+		t.Fatalf("file migrate keys not applied: %+v %v", got, err)
+	}
+}
+
+// TestHealthcheck probes the subcommand against a fake mux: default
+// /healthz path, explicit wrong path, and refused connection.
 func TestHealthcheck(t *testing.T) {
 	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/healthz" {

@@ -310,9 +310,9 @@ func TestLiveJavaVsGo(t *testing.T) {
 	}
 	if err := WriteResult(Artifact{Dir: outDir, Method: method,
 		Resolved: resolved, JavaSHA: shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), GoSHA: shaOr("EQUALIX_GO_SHA", "go-unrecorded"), Calibration: calibration, Traces: traces, Fetch: fetch,
-		Warmup: map[string]int{"java": java.Warmup, "go": goRes.Warmup},
+		Warmup:   map[string]int{"java": java.Warmup, "go": goRes.Warmup},
 		Prephase: map[string]int{"java": java.PrephaseDispatched, "go": goRes.PrephaseDispatched},
-		Startup: startup, MM: mm}); err != nil {
+		Startup:  startup, MM: mm}); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("java shares: %s", summarize(java.Log))
@@ -492,9 +492,9 @@ func TestLiveGoVsGo(t *testing.T) {
 	}
 	if err := WriteResult(Artifact{Dir: outDir, Method: method,
 		Resolved: resolved, JavaSHA: goSHA, GoSHA: goSHA, Calibration: calibration, Traces: traces, Fetch: fetch,
-		Warmup: map[string]int{"go1": g1.Warmup, "go2": g2.Warmup},
+		Warmup:   map[string]int{"go1": g1.Warmup, "go2": g2.Warmup},
 		Prephase: map[string]int{"go1": g1.PrephaseDispatched, "go2": g2.PrephaseDispatched},
-		Startup: startup, MM: mm}); err != nil {
+		Startup:  startup, MM: mm}); err != nil {
 		t.Fatal(err)
 	}
 	if mm != nil {

@@ -31,8 +31,8 @@ type ProcSpec struct {
 // the readiness URL (any status — even 401 — counts as alive; the gate is
 // "socket accepting and routing", readiness semantics stay per-side).
 type Proc struct {
-	spec ProcSpec
-	cmd  *exec.Cmd
+	spec      ProcSpec
+	cmd       *exec.Cmd
 	SpawnedAt time.Time
 	ReadyAt   time.Time
 }
