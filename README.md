@@ -16,7 +16,8 @@ This is **not a language port**. The Java code is the behavioral reference; the 
 
 **Pre-alpha.** Under active development. Not production-ready. See [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) for the current phase and [`CONTRIBUTING.md`](CONTRIBUTING.md) for the acceptance gates.
 
-*Freshness: `main` at `4ffe668` (EQLX-6 Prometheus adapter merged) · 2026-10-05 · Java oracle at `11ef025`. Bumped on phase transitions per CONTRIBUTING, not every merge.*
+*State as of: `8d0be95` (2026-10-05) — EQLX-6 closed (deployability); EQLX-7 scoped.*
+*Java oracle at `11ef025` (unchanged). Bumped on phase transitions per CONTRIBUTING, not every merge.*
 
 ### Maturity
 
