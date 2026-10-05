@@ -24,7 +24,16 @@ pending and no home phase to put them in).
    ramp with deadline). Verdict: promotion counts recorded per side, shares gated as usual. Closes the maturity table's
    starvation-promotion row as *characterized*. If the first tuning run
    avalanches or starves, record the shape and retune — the row wants
-   one deliberate deadline exercise, not a specific outcome. Output:
+   one deliberate deadline exercise, not a specific outcome. Sweep,
+   not a single run: the crossover band (the rate range where the
+   deadline mechanism and the steady-state gate become
+   indistinguishable) cannot be produced from one tuned point — run at
+   least three rates (below / at / above the expected crossover), one
+   parameterized workload file with three invocations, not three
+   files. The band is empirical (K-dominant above, deadline-dominant
+   below, with the observed edges), never inferred from the mechanism
+   alone — the CORRECTION-3 NOTE already contains the derivation, and
+   re-deriving it would duplicate rather than evidence. Output:
    `docs/evidence/eqlx-7-promotion-deadline.md` in the EQLX-5 evidence
    shape: tuned rate, per-side promoted counts, share deviation at
    that rate, and the crossover band (the rate range where the two
@@ -72,10 +81,16 @@ pending and no home phase to put them in).
    report `dev`.
 7. **What v0.1.0 ships: tag + GitHub release + GHCR image.** Release
    notes are the CHANGELOG's v0.1.0 section verbatim. The image
-   (`ghcr.io/synanton/equalix-go:v0.1.0`) builds in a release workflow
+   (   `ghcr.io/synanton/equalix-go:v0.1.0`) builds in a release workflow
    (tag trigger, GITHUB_TOKEN registry auth) from the tagged tree with
-   the VERSION-derived stamp. No source tarball (the tag is the
-   tarball), no Docker Hub (one registry, not two). The release
+   the VERSION-derived stamp. The workflow carries a
+   `workflow_dispatch` trigger with a `dry_run: true` input alongside
+   the tag trigger: the pipeline is rehearsed end-to-end (build, tag
+   resolution, notes extraction) without pushing a real tag, because a
+   first-run failure discovered via the v0.1.0 tag is a public broken
+   release. If dispatch cannot exercise the full push flow, fall back
+   to a `v0.1.0-rc1` pre-release tag first. No source tarball (the tag
+   is the tarball), no Docker Hub (one registry, not two). The release
    workflow does not exist yet — it is a deliverable of this phase,
    not an existing capability: trigger on `push.tags: ['v*']`,
    `permissions: { contents: write, packages: write }`, GHCR login
@@ -85,10 +100,15 @@ pending and no home phase to put them in).
    registry-side immutability settings), release creation from the
    CHANGELOG section. Assert tag == VERSION content, fail otherwise.
 8. **CHANGELOG convention: Keep-a-Changelog** (Added / Changed /
-   Deprecated / Removed / Fixed / Security) per version section. This
-   is orthogonal to spec §13's DECISION/CORRECTION/NOTE taxonomy:
-   CHANGELOG records user-visible change, spec records design
-   rationale. The v0.2.0 cut follows the same shape.
+   Deprecated / Removed / Fixed / Security) per version section, with
+   each Added entry citing its evidence file (`docs/evidence/…`) —
+   the v0.1.0 section links the warm-class matrix and the three
+   residual evidence files, so "shipped with residuals complete" is
+   supported from the CHANGELOG alone and the two sources cannot drift
+   independently. This is orthogonal to spec §13's
+   DECISION/CORRECTION/NOTE taxonomy: CHANGELOG records user-visible
+   change, spec records design rationale. The v0.2.0 cut follows the
+   same shape.
 9. **Release docs:** `docs/architecture.md` (ports/adapters/jobs map
    for the new reader), `docs/benchmarks.md` (existing bench numbers
    with hardware provenance). `docs/api.md`, `docs/runbook.md`
@@ -131,7 +151,7 @@ pending and no home phase to put them in).
 
 ## Sequence
 
-1. Promotion-deadline workload + run (needs the RPS-gate trickle; reuse warm machinery).
+1. Promotion-deadline 3-point sweep (parameterized file, below/at/above crossover).
 2. Idle-tenant workload + JvG/GvG warm-class pair.
 3. CMS error curve (uniform + zipfian, conformance, no live pair).
 4. Release docs + CHANGELOG + VERSION + tag + GHCR image.
