@@ -24,22 +24,31 @@ pending and no home phase to put them in).
    ramp with deadline). Verdict: promotion counts recorded per side, shares gated as usual. Closes the maturity table's
    starvation-promotion row as *characterized*. If the first tuning run
    avalanches or starves, record the shape and retune — the row wants
-   one deliberate deadline exercise, not a specific outcome.
+   one deliberate deadline exercise, not a specific outcome. Output:
+   `docs/evidence/eqlx-7-promotion-deadline.md` in the EQLX-5 evidence
+   shape: tuned rate, per-side promoted counts, share deviation at
+   that rate, and the crossover band (the rate range where the two
+   mechanisms are indistinguishable).
 2. **Idle-tenant credit: parity check, not just characterization.** A
    tenant idle for the first half, active for the second — run as a
-   JvG + GvG warm-class pair. The interesting property is shared: if
-   virtual-time credit accumulates during idle, a returning tenant
-   bursts unfairly, and both implementations must share the behavior
-   for parity to hold. Divergence here is mechanism evidence for the
+   JvG + GvG warm-class pair, in BOTH floor regimes: above floor
+   (controller unpinned, tenant drains — the run where parity is
+   actually observable) and below floor (control proving the floor
+   does its job; a below-floor-only residual would document vacuous
+   parity). Divergence here is mechanism evidence for the
    virtual-time NOTE family with a parity interpretation (not a gate —
-   N=1 pair each, below the rate-criterion sample floor).
+   N=1 pair each, below the rate-criterion sample floor). Output:
+   `docs/evidence/eqlx-7-idle-tenant.md` in the EQLX-5 evidence shape,
+   N-caveat as the header.
 3. **CMS error curve.** Sketch estimate vs actual with three pinned
    knobs: cardinalities 100 / 1k / 10k / 100k; distributions uniform
    AND zipfian (uniform overstates CMS accuracy for bursty real
    workloads — at minimum one zipfian run); error metric = per-key
    relative error distribution (p50/p99/max) plus mean absolute.
    Conformance-level, no live pair needed (Java's CMS params are
-   known). Closes the residual as a curve, not a bound.
+   known). Closes the residual as a curve, not a bound. Output: table
+   (cardinality × distribution × error metric) plus the raw JSON that
+   produced it (plotted curve optional — the JSON is the citable part).
 4. **Java cold-startup cell: documented blocked, not scheduled.** Needs
    a genuinely fresh host (page-cache-cold JVM); that is an
    opportunity, not a task. Recorded in the runbook + maturity table as
@@ -66,7 +75,15 @@ pending and no home phase to put them in).
    (`ghcr.io/synanton/equalix-go:v0.1.0`) builds in a release workflow
    (tag trigger, GITHUB_TOKEN registry auth) from the tagged tree with
    the VERSION-derived stamp. No source tarball (the tag is the
-   tarball), no Docker Hub (one registry, not two).
+   tarball), no Docker Hub (one registry, not two). The release
+   workflow does not exist yet — it is a deliverable of this phase,
+   not an existing capability: trigger on `push.tags: ['v*']`,
+   `permissions: { contents: write, packages: write }`, GHCR login
+   with `GITHUB_TOKEN`, `docker/build-push-action` with tags
+   `:v0.1.0` AND `:sha-<full-sha>` (dual-tagging: the sha tag is the
+   immutable reference even if `:v0.1.0` ever moves; no reliance on
+   registry-side immutability settings), release creation from the
+   CHANGELOG section. Assert tag == VERSION content, fail otherwise.
 8. **CHANGELOG convention: Keep-a-Changelog** (Added / Changed /
    Deprecated / Removed / Fixed / Security) per version section. This
    is orthogonal to spec §13's DECISION/CORRECTION/NOTE taxonomy:

@@ -1,11 +1,19 @@
 MODULE := github.com/synanton/equalix-go
 GO := go
 GOLANGCI := golangci-lint
+# Single source of truth for the binary version (spec §13: version
+# mechanics). Every build path stamps from here — make, Docker
+# (--build-arg VERSION=$(cat VERSION)), release workflow. Missing file
+# (source tarball without it, detached oddity) falls back to dev rather
+# than failing the build; the release workflow asserts tag == content
+# separately, so the fallback can never ship a release.
+VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
+LDFLAGS := -s -w -X main.version=$(VERSION)
 
 .PHONY: build test test-integration test-conformance test-differential bench lint vet tools clean
 
 build:
-	$(GO) build ./...
+	$(GO) build -ldflags "$(LDFLAGS)" ./...
 
 test:
 	$(GO) test -race ./...
