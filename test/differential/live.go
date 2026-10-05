@@ -190,9 +190,9 @@ type SideResult struct {
 	// start (warm-up pre-phase size; 0 on cold runs). Feeds
 	// results.json:prephase so whole-DB trace totals stay interpretable.
 	PrephaseDispatched int
-	SpawnedAt time.Time
-	ReadyAt   time.Time
-	FirstDispatch time.Time
+	SpawnedAt          time.Time
+	ReadyAt            time.Time
+	FirstDispatch      time.Time
 }
 
 // countDispatched is the one-shot version of the tracer's dispatched
@@ -464,8 +464,8 @@ func ResetDB(ctx context.Context, dsn string) error {
 // attribute divergence to ramp timing vs scheduling: if RPS trajectories
 // match and shares still diverge, the residual is a real difference.
 type TracePoint struct {
-	At time.Time `json:"at"`
-	RPS float64 `json:"rps"`
+	At  time.Time `json:"at"`
+	RPS float64   `json:"rps"`
 	// TotalDispatched counts ALL non-RECEIVED rows in the side's DB,
 	// including the warm-up pre-phase on warm-class runs: it is the
 	// whole-DB number, never the measurement-window count. The
@@ -484,11 +484,11 @@ type TracePoint struct {
 // Cold-vs-warm JVM cache must be declared alongside any Java cell:
 // page-cache-warm starts run 2–3x faster, and CI runners are warm.
 type StartupInfo struct {
-	Spawn        time.Time `json:"spawn"`
-	Ready        time.Time `json:"ready"`
+	Spawn         time.Time `json:"spawn"`
+	Ready         time.Time `json:"ready"`
 	FirstDispatch time.Time `json:"first_dispatch"`
 	// Derived phase durations, milliseconds.
-	SpawnToReadyMs       float64 `json:"spawn_to_ready_ms"`
+	SpawnToReadyMs         float64 `json:"spawn_to_ready_ms"`
 	ReadyToFirstDispatchMs float64 `json:"ready_to_first_dispatch_ms"`
 }
 
@@ -531,15 +531,15 @@ type Result struct {
 	Prephase map[string]int `json:"prephase,omitempty"`
 	// Startup holds the per-side spawn → ready → first-dispatch record:
 	// runtime characterization for the matrix, never an acceptance input.
-	Startup map[string]StartupInfo `json:"startup,omitempty"`
-	Pass    bool                   `json:"pass"`
-	Mismatch *Mismatch            `json:"mismatch,omitempty"`
+	Startup  map[string]StartupInfo `json:"startup,omitempty"`
+	Pass     bool                   `json:"pass"`
+	Mismatch *Mismatch              `json:"mismatch,omitempty"`
 }
 
 // Artifact is the full WriteResult input: eleven positional params proved
 // to be a readability cliff, so the published-artifact fields travel as
 // one struct. Callers fill what their leg measures.
-type 	Artifact struct {
+type Artifact struct {
 	Dir         string
 	Method      string
 	Resolved    *Resolved

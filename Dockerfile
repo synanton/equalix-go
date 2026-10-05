@@ -16,7 +16,9 @@
 #
 # Health signal (pinned): /healthz liveness, NOT /metrics — the exporter
 # serves 200 with a dead DB, which would report a broken container
-# healthy. TODO(GAP-5): repoint the healthcheck --path to /readyz once
+# healthy. /healthz stays 200 through shutdown drain by construction
+# (k8s-safe: liveness must not restart a deliberately-draining pod).
+# TODO(GAP-5): repoint the healthcheck --path to /readyz once
 # the readiness endpoint (DB, locks, migrations, shutdown drain) lands.
 
 ARG GO_VERSION=1.22

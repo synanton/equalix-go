@@ -11,6 +11,7 @@
 -- Reference: docs/spec.md single-clock NOTE.
 
 -- +goose Up
+-- +goose STATEMENTBEGIN
 CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
 BEGIN
     -- UPDATE: unconditional DB clock (no legitimate writer sets this).
@@ -22,7 +23,9 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose STATEMENTEND
 
+-- +goose STATEMENTBEGIN
 DO $$
 DECLARE tbl text;
 BEGIN
@@ -36,8 +39,10 @@ BEGIN
     END LOOP;
 END;
 $$;
+-- +goose STATEMENTEND
 
 -- +goose Down
+-- +goose STATEMENTBEGIN
 DO $$
 DECLARE tbl text;
 BEGIN
@@ -49,4 +54,5 @@ BEGIN
     END LOOP;
 END;
 $$;
+-- +goose STATEMENTEND
 DROP FUNCTION IF EXISTS set_updated_at();

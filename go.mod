@@ -8,7 +8,13 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.33.0
 )
 
-require gopkg.in/yaml.v3 v3.0.1 // indirect
+require (
+	github.com/mfridman/interpolate v0.0.2 // indirect
+	github.com/pressly/goose/v3 v3.21.1 // indirect
+	github.com/sethvargo/go-retry v0.2.4 // indirect
+	go.uber.org/multierr v1.11.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

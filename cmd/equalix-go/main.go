@@ -129,6 +129,8 @@ type fileConfig struct {
 	MetricsPath      *string `yaml:"metrics-path"`
 	MetricsTenantCap *int    `yaml:"metrics-tenant-cap"`
 	MetricsDriftKeys *int    `yaml:"metrics-drift-max-keys"`
+	MigrateOnStartup *bool   `yaml:"migrate-on-startup"`
+	MigrationsDir    *string `yaml:"migrations-dir"`
 }
 
 // settings is the resolved runtime configuration.
@@ -138,6 +140,8 @@ type settings struct {
 	ExecBase             string
 	MetricsPath          string
 	TenantCap, DriftKeys int
+	MigrateOnStartup     bool
+	MigrationsDir        string
 }
 
 func loadFileConfig(path string, explicit bool) (fileConfig, error) {
@@ -160,6 +164,16 @@ func strVal(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// envBool parses a truthy env (1/true/yes, case-insensitive); anything
+// else is false — an opt-in knob must never enable on a typo.
+func envBool(v string) bool {
+	switch v {
+	case "1", "true", "TRUE", "True", "yes", "YES", "Yes":
+		return true
+	}
+	return false
 }
 
 // resolveSettings applies the pinned precedence: explicit flags > env >
@@ -196,11 +210,22 @@ func resolveSettings(set map[string]bool, fl settings, getenv func(string) strin
 		return def, nil
 	}
 	out := settings{
-		DSN:         str("dsn", fl.DSN, "EQUALIX_DSN", strVal(fc.DSN), ""),
-		Addr:        str("addr", fl.Addr, "EQUALIX_ADDR", strVal(fc.Addr), ":8080"),
-		APIKey:      str("api-key", fl.APIKey, "EQUALIX_API_KEY", strVal(fc.APIKey), ""),
-		ExecBase:    str("executor-base-url", fl.ExecBase, "EQUALIX_EXECUTOR_BASE_URL", strVal(fc.ExecutorBaseURL), ""),
-		MetricsPath: str("metrics-path", fl.MetricsPath, "EQUALIX_METRICS_PATH", strVal(fc.MetricsPath), "/metrics"),
+		DSN:           str("dsn", fl.DSN, "EQUALIX_DSN", strVal(fc.DSN), ""),
+		Addr:          str("addr", fl.Addr, "EQUALIX_ADDR", strVal(fc.Addr), ":8080"),
+		APIKey:        str("api-key", fl.APIKey, "EQUALIX_API_KEY", strVal(fc.APIKey), ""),
+		ExecBase:      str("executor-base-url", fl.ExecBase, "EQUALIX_EXECUTOR_BASE_URL", strVal(fc.ExecutorBaseURL), ""),
+		MetricsPath:   str("metrics-path", fl.MetricsPath, "EQUALIX_METRICS_PATH", strVal(fc.MetricsPath), "/metrics"),
+		MigrationsDir: str("migrations-dir", fl.MigrationsDir, "EQUALIX_MIGRATIONS_DIR", strVal(fc.MigrationsDir), ""),
+	}
+	// Bool knob, strict precedence (an explicit --migrate-on-startup=false
+	// vetoes env/file — unlike strings, absence and false differ, so each
+	// layer is tested for presence, not truthiness).
+	if set["migrate-on-startup"] {
+		out.MigrateOnStartup = fl.MigrateOnStartup
+	} else if v := getenv("EQUALIX_MIGRATE_ON_STARTUP"); v != "" {
+		out.MigrateOnStartup = envBool(v)
+	} else if fc.MigrateOnStartup != nil {
+		out.MigrateOnStartup = *fc.MigrateOnStartup
 	}
 	var err error
 	if out.MaxPayload, err = num("max-payload-bytes", fl.MaxPayload, "EQUALIX_MAX_PAYLOAD_BYTES", fc.MaxPayloadBytes, 1048576); err != nil {
@@ -232,15 +257,17 @@ func run() error {
 	// non-positive int cap fails loud instead of silently halving
 	// observability to a zero cap that drops every labeled sample).
 	var (
-		dsn         = flag.String("dsn", "", "PostgreSQL DSN (or EQUALIX_DSN)")
-		addr        = flag.String("addr", "", "HTTP listen address (default :8080)")
-		apiKey      = flag.String("api-key", "", "API key, prefer EQUALIX_API_KEY env (flag value is visible in ps)")
-		maxPayload  = flag.Int("max-payload-bytes", 0, "ingest payload cap (default 1048576, Java app.queue.max-payload-bytes)")
-		execBase    = flag.String("executor-base-url", "", "executor base URL receiving POST /tasks/{id}/execute (or EQUALIX_EXECUTOR_BASE_URL)")
-		metricsPath = flag.String("metrics-path", "", "Prometheus exposition path on the service mux (default /metrics; operators: do not expose publicly)")
-		tenantCap   = flag.Int("metrics-tenant-cap", 0, "distinct tenants per tenant-labeled metric (default 1000); beyond the cap samples drop and count as cardinality-exceeded")
-		driftKeys   = flag.Int("metrics-drift-max-keys", 0, "per-report drift series cap, sorted truncation (default 1000)")
-		configPath  = flag.String("config", "/etc/equalix/config.yaml", "YAML config file (loaded when present; missing explicit path is fatal, missing default is ignored)")
+		dsn              = flag.String("dsn", "", "PostgreSQL DSN (or EQUALIX_DSN)")
+		addr             = flag.String("addr", "", "HTTP listen address (default :8080)")
+		apiKey           = flag.String("api-key", "", "API key, prefer EQUALIX_API_KEY env (flag value is visible in ps)")
+		maxPayload       = flag.Int("max-payload-bytes", 0, "ingest payload cap (default 1048576, Java app.queue.max-payload-bytes)")
+		execBase         = flag.String("executor-base-url", "", "executor base URL receiving POST /tasks/{id}/execute (or EQUALIX_EXECUTOR_BASE_URL)")
+		metricsPath      = flag.String("metrics-path", "", "Prometheus exposition path on the service mux (default /metrics; operators: do not expose publicly)")
+		tenantCap        = flag.Int("metrics-tenant-cap", 0, "distinct tenants per tenant-labeled metric (default 1000); beyond the cap samples drop and count as cardinality-exceeded")
+		driftKeys        = flag.Int("metrics-drift-max-keys", 0, "per-report drift series cap, sorted truncation (default 1000)")
+		migrateOnStartup = flag.Bool("migrate-on-startup", false, "apply pending migrations before serving (or EQUALIX_MIGRATE_ON_STARTUP=true); default false — multi-instance deploys migrate as a separate step")
+		migrationsDir    = flag.String("migrations-dir", "", "read goose files from disk instead of the embedded set (operators who inspect SQL first)")
+		configPath       = flag.String("config", "/etc/equalix/config.yaml", "YAML config file (loaded when present; missing explicit path is fatal, missing default is ignored)")
 	)
 	flag.Parse()
 
@@ -257,7 +284,8 @@ func run() error {
 	s, err := resolveSettings(set,
 		settings{DSN: *dsn, Addr: *addr, APIKey: *apiKey, MaxPayload: *maxPayload,
 			ExecBase: *execBase, MetricsPath: *metricsPath,
-			TenantCap: *tenantCap, DriftKeys: *driftKeys},
+			TenantCap: *tenantCap, DriftKeys: *driftKeys,
+			MigrateOnStartup: *migrateOnStartup, MigrationsDir: *migrationsDir},
 		os.Getenv, fc)
 	if err != nil {
 		return err
@@ -275,8 +303,22 @@ func run() error {
 		return fmt.Errorf("missing --api-key (or EQUALIX_API_KEY)")
 	}
 
+	// Migrate-on-startup runs BEFORE any pool, probe, or listener:
+	// migrated schema is a precondition of serving, never background
+	// work. Fail-fast (exit 1) on any error — a half-migrated schema
+	// must never serve traffic. Opt-in, default false: multi-instance
+	// deploys migrate as a separate step to avoid lock-queue pileups.
+	// The signal context is created first so SIGTERM cancels a stuck
+	// migration instead of wedging startup past the orchestrator.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if s.MigrateOnStartup {
+		milestone("migrating")
+		if err := pgadapter.Migrate(ctx, s.DSN, s.MigrationsDir); err != nil {
+			return err
+		}
+		milestone("migrated")
+	}
 
 	pool, err := pgxpool.New(ctx, s.DSN)
 	if err != nil {

@@ -141,6 +141,7 @@ func TestWarmupFromEnv(t *testing.T) {
 		t.Fatalf("parsed = %+v, want warm-500 paced-8 with RPS fallback", cfg)
 	}
 }
+
 // for a real scheduler: fresh stub, ingest with marker capture, drain to
 // terminal, Close-captured log, offset translation. The live pipeline with
 // none of the live processes.
