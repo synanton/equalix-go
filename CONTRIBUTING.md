@@ -82,6 +82,11 @@ test/
 5. Run `make test lint` (and `go test -race ./...`) before committing.
 6. Open a PR with a clear description linking the spec section and the epic ticket. Prefix branches with `EQLX-` (e.g. `EQLX-domain-priority`).
 7. Merging is manual — a maintainer merges after review. Do not merge your own PR without approval.
+8. Freshness marker: the italic line under README Status names the latest
+   phase-landing merge, its date, and the Java oracle SHA. Bump it on
+   phase transitions (a merged epic scope or gate), not every merge —
+   its job is answering "how stale is this review," and per-merge bumps
+   would train readers to ignore it.
 
 ---
 
