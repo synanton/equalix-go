@@ -186,9 +186,29 @@ type SideResult struct {
 	Log    RunLog
 	Marker time.Time
 	Warmup int
+	// PrephaseDispatched is the DB-dispatched row count at measurement
+	// start (warm-up pre-phase size; 0 on cold runs). Feeds
+	// results.json:prephase so whole-DB trace totals stay interpretable.
+	PrephaseDispatched int
 	SpawnedAt time.Time
 	ReadyAt   time.Time
 	FirstDispatch time.Time
+}
+
+// countDispatched is the one-shot version of the tracer's dispatched
+// series: non-RECEIVED rows at this instant. Used once per side at
+// measurement start to pin the pre-phase size.
+func countDispatched(ctx context.Context, dsn string) (int, error) {
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return 0, fmt.Errorf("differential: prephase connect: %w", err)
+	}
+	defer conn.Close(ctx)
+	var n int
+	if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM tasks WHERE status <> 'RECEIVED'`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("differential: prephase count: %w", err)
+	}
+	return n, nil
 }
 
 // waitQuiesced polls until no RECEIVED rows remain (calculator drained)
@@ -444,10 +464,14 @@ func ResetDB(ctx context.Context, dsn string) error {
 // attribute divergence to ramp timing vs scheduling: if RPS trajectories
 // match and shares still diverge, the residual is a real difference.
 type TracePoint struct {
-	At         time.Time `json:"at"`
-	RPS        float64   `json:"rps"`
-	Dispatched int       `json:"dispatched"`
-	Promoted   int       `json:"promoted"`
+	At time.Time `json:"at"`
+	RPS float64 `json:"rps"`
+	// TotalDispatched counts ALL non-RECEIVED rows in the side's DB,
+	// including the warm-up pre-phase on warm-class runs: it is the
+	// whole-DB number, never the measurement-window count. The
+	// measurement count is total minus results.json:prephase[side].
+	TotalDispatched int `json:"total_dispatched_including_prephase"`
+	Promoted        int `json:"promoted"`
 }
 
 // StartupInfo is one side's spawn → ready → first-dispatch record: the
@@ -500,6 +524,11 @@ type Result struct {
 	// Warmup records the quiescence-prefix length per side: ordering
 	// diagnostics without it cannot separate transient from steady state.
 	Warmup map[string]int `json:"warmup,omitempty"`
+	// Prephase records DB-dispatched rows at measurement start per side
+	// (warm-up pre-phase size; 0 on cold runs): total_dispatched minus
+	// prephase[side] is the measurement-window count. Without this the
+	// 2928-style totals read as measurement volume.
+	Prephase map[string]int `json:"prephase,omitempty"`
 	// Startup holds the per-side spawn → ready → first-dispatch record:
 	// runtime characterization for the matrix, never an acceptance input.
 	Startup map[string]StartupInfo `json:"startup,omitempty"`
@@ -510,7 +539,7 @@ type Result struct {
 // Artifact is the full WriteResult input: eleven positional params proved
 // to be a readability cliff, so the published-artifact fields travel as
 // one struct. Callers fill what their leg measures.
-type Artifact struct {
+type 	Artifact struct {
 	Dir         string
 	Method      string
 	Resolved    *Resolved
@@ -520,6 +549,7 @@ type Artifact struct {
 	Traces      map[string][]TracePoint
 	Fetch       map[string]fetchStat
 	Warmup      map[string]int
+	Prephase    map[string]int
 	Startup     map[string]StartupInfo
 	MM          *Mismatch
 }
@@ -531,7 +561,7 @@ func WriteResult(a Artifact) error {
 	if err := os.MkdirAll(a.Dir, 0o755); err != nil {
 		return err
 	}
-	res := Result{Resolved: *a.Resolved, Method: a.Method, Traces: a.Traces, Calibration: a.Calibration, StatusFetch: a.Fetch, Warmup: a.Warmup, Startup: a.Startup, Pass: a.MM == nil, Mismatch: a.MM}
+	res := Result{Resolved: *a.Resolved, Method: a.Method, Traces: a.Traces, Calibration: a.Calibration, StatusFetch: a.Fetch, Warmup: a.Warmup, Prephase: a.Prephase, Startup: a.Startup, Pass: a.MM == nil, Mismatch: a.MM}
 	raw, err := json.MarshalIndent(res, "", "  ")
 	if err != nil {
 		return err

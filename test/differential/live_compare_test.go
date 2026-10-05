@@ -157,12 +157,21 @@ func TestLiveJavaVsGo(t *testing.T) {
 			t.Fatalf("side %s reset: %v", name, err)
 		}
 		measureFrom := 0
+		prephase := 0
 		if warmCfg.Tasks > 0 {
 			m, err := RunWarmup(ctx, &http.Client{Timeout: 10 * time.Second}, SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, APIKey: apiKey}, apiKey, workload, stub, warmCfg)
 			if err != nil {
 				t.Fatalf("side %s warmup: %v", name, err)
 			}
 			measureFrom = m
+			// Pin the pre-phase DB size HERE (between warm-up drain and
+			// measurement ingest): counting after RunSide would mix
+			// measurement rows into the pre-phase number.
+			n, err := countDispatched(ctx, dsn)
+			if err != nil {
+				t.Fatalf("side %s prephase count: %v", name, err)
+			}
+			prephase = n
 		}
 		svc := SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, HTTPPort: 0, APIKey: apiKey}
 		res, err := RunSide(ctx, svc, apiKey, workload, stub, 180*time.Second, measureFrom)
@@ -170,6 +179,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 			t.Fatalf("side %s: %v", name, err)
 		}
 		res.SpawnedAt, res.ReadyAt = proc.SpawnedAt, proc.ReadyAt
+		res.PrephaseDispatched = prephase
 		return res
 	}
 
@@ -282,9 +292,9 @@ func TestLiveJavaVsGo(t *testing.T) {
 	for side, pts := range traces {
 		if len(pts) > 0 {
 			live, first, last := LiveStats(pts)
-			t.Logf("trace %s: %d samples (%d live, rps %.1f→%.1f), dispatched %d, promoted %d",
+			t.Logf("trace %s: %d samples (%d live, rps %.1f→%.1f), total dispatched %d (incl prephase), promoted %d",
 				side, len(pts), live, first, last,
-				pts[len(pts)-1].Dispatched, pts[len(pts)-1].Promoted)
+				pts[len(pts)-1].TotalDispatched, pts[len(pts)-1].Promoted)
 		}
 	}
 	for side, st := range fetch {
@@ -300,7 +310,9 @@ func TestLiveJavaVsGo(t *testing.T) {
 	}
 	if err := WriteResult(Artifact{Dir: outDir, Method: method,
 		Resolved: resolved, JavaSHA: shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), GoSHA: shaOr("EQUALIX_GO_SHA", "go-unrecorded"), Calibration: calibration, Traces: traces, Fetch: fetch,
-		Warmup: map[string]int{"java": java.Warmup, "go": goRes.Warmup}, Startup: startup, MM: mm}); err != nil {
+		Warmup: map[string]int{"java": java.Warmup, "go": goRes.Warmup},
+		Prephase: map[string]int{"java": java.PrephaseDispatched, "go": goRes.PrephaseDispatched},
+		Startup: startup, MM: mm}); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("java shares: %s", summarize(java.Log))
@@ -378,12 +390,18 @@ func TestLiveGoVsGo(t *testing.T) {
 			t.Fatalf("side %s reset: %v", name, err)
 		}
 		measureFrom := 0
+		prephase := 0
 		if warmCfg.Tasks > 0 {
 			m, err := RunWarmup(ctx, &http.Client{Timeout: 10 * time.Second}, SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, APIKey: apiKey}, apiKey, workload, stub, warmCfg)
 			if err != nil {
 				t.Fatalf("side %s warmup: %v", name, err)
 			}
 			measureFrom = m
+			n, err := countDispatched(ctx, dsn)
+			if err != nil {
+				t.Fatalf("side %s prephase count: %v", name, err)
+			}
+			prephase = n
 		}
 		svc := SideConfig{Name: name, BaseURL: svcURL, DSN: dsn, HTTPPort: svcPort, APIKey: apiKey}
 		res, err := RunSide(ctx, svc, apiKey, workload, stub, 180*time.Second, measureFrom)
@@ -391,6 +409,7 @@ func TestLiveGoVsGo(t *testing.T) {
 			t.Fatalf("side %s: %v", name, err)
 		}
 		res.SpawnedAt, res.ReadyAt = proc.SpawnedAt, proc.ReadyAt
+		res.PrephaseDispatched = prephase
 		return res
 	}
 	g1 := runGo("go1", "http://127.0.0.1:18085", 18085, 18095, os.Getenv("EQUALIX_GO_DSN"))
@@ -454,9 +473,9 @@ func TestLiveGoVsGo(t *testing.T) {
 	for side, pts := range traces {
 		if len(pts) > 0 {
 			live, first, last := LiveStats(pts)
-			t.Logf("trace %s: %d samples (%d live, rps %.1f→%.1f), dispatched %d, promoted %d",
+			t.Logf("trace %s: %d samples (%d live, rps %.1f→%.1f), total dispatched %d (incl prephase), promoted %d",
 				side, len(pts), live, first, last,
-				pts[len(pts)-1].Dispatched, pts[len(pts)-1].Promoted)
+				pts[len(pts)-1].TotalDispatched, pts[len(pts)-1].Promoted)
 		}
 	}
 	for side, st := range fetch {
@@ -473,7 +492,9 @@ func TestLiveGoVsGo(t *testing.T) {
 	}
 	if err := WriteResult(Artifact{Dir: outDir, Method: method,
 		Resolved: resolved, JavaSHA: goSHA, GoSHA: goSHA, Calibration: calibration, Traces: traces, Fetch: fetch,
-		Warmup: map[string]int{"go1": g1.Warmup, "go2": g2.Warmup}, Startup: startup, MM: mm}); err != nil {
+		Warmup: map[string]int{"go1": g1.Warmup, "go2": g2.Warmup},
+		Prephase: map[string]int{"go1": g1.PrephaseDispatched, "go2": g2.PrephaseDispatched},
+		Startup: startup, MM: mm}); err != nil {
 		t.Fatal(err)
 	}
 	if mm != nil {

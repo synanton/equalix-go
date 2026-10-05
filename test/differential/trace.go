@@ -92,7 +92,7 @@ func (t *Tracer) sample(sides map[string]Side, _ string) {
 		}
 		// RPS -1 = no reading (not zero — zero is a real throttle floor
 		// value and must never be confused with a missed sample).
-		p.Dispatched, p.Promoted = fetchCounts(s)
+		p.TotalDispatched, p.Promoted = fetchCounts(s)
 		t.mu.Lock()
 		t.points[name] = append(t.points[name], p)
 		t.mu.Unlock()

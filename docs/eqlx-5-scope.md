@@ -72,6 +72,26 @@ dishonest. Rows 8, 9, 11 carry bounds — those are the scheduler
 semantics. Row 10 is completion-gated (both finish) with reported timing.
 Row 13 is evidence-only per the match criterion above.
 
+### 1a. Workload classes — cold characterizes, warm gates (pinned)
+
+Row 8's bound applies per workload class, and the two classes have
+different acceptance roles — comparing across classes measures the
+workload, not the implementations:
+
+- **Cold class** (instant burst, no pre-phase): characterizes the
+  runtime asymmetry. Java's slower RPS ramp interacts with the 60s
+  promotion deadline (spec §13, promotion asymmetry NOTE); the cold rate
+  comparison (observed 2/5 JvG fails vs 0/5 GvG fails) is a *reported
+  characteristic*, never a gate. A reader seeing the cold split must not
+  reopen it as a parity question.
+- **Warm class** (paced pre-phase to RPS floor, then the measured
+  workload): the parity gate. Rate criterion per class at N=10 with
+  one-run slack (JvG fails ≤ GvG fails + 1); same slack at N=5 with the
+  stated resolution caveat. Cross-class comparison (JvG-warm vs GvG-cold)
+  is forbidden by construction — different workloads, different bars.
+- Every run declares its class in `results.json:methodology`
+  (`[cold]` / `[warm-N-pP-rpsR]`).
+
 ### 2. Workload definition — full task specification, seeded executor
 
 - **Workload file (JSONL, checked in under `test/differential/workloads/`):**
