@@ -105,10 +105,18 @@ RPS `1`, 5%/2s ramp (Java `application.yml` parity).
 ## 6. Observability (with observed typicals, dated 2026-10-05)
 
 Wire names canonical per spec §13 (sole source:
-`internal/adapter/metrics`). Typical values below are **idle-observed**
-(45s, empty DB, no executor) unless noted — order-of-magnitude
-guidance, not SLOs. Populate loaded typicals from warm-CI snapshots
-as they accumulate; do not invent them.
+`internal/adapter/metrics`).
+
+> **Read this before the table: the two measured typicals below are
+> idle/low-cardinality observations (45s, empty DB, no executor).
+> They do NOT extrapolate to loaded production — at 100k tenants the
+> watchdog scan alone can run two orders of magnitude hotter. The
+> "Idle observed" column is what was measured; the "Loaded guidance"
+> column is order-of-magnitude orientation until snapshots arrive.
+> Loaded typicals accumulate in the nightly CI artifacts
+> (`differential-results-<run>-<sha>/results-jvg|gvg/metrics/*.txt`,
+> 90-day retention) — cite a snapshot, not this table, for loaded
+> numbers.
 
 | Series | Type | Idle observed | Loaded guidance |
 |---|---|---|---|

@@ -1,0 +1,46 @@
+# Local development stack: Postgres + equalix-go (built from source).
+#
+# Usage:
+#   EQUALIX_API_KEY=secret docker compose up --build
+# The service migrates on startup (EQUALIX_MIGRATE_ON_STARTUP=true) so a
+# fresh clone serves without manual migration steps. No executor is
+# wired here: ingest + tagging run, dispatch waits for one (see runbook
+# §1 for the full executor-wired invocation).
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cmp
+      POSTGRES_PASSWORD: x
+      POSTGRES_DB: equalix_go
+    ports:
+      # Host ports via env so stacked environments don't collide
+      # (compose v5 appends override-file port lists instead of
+      # replacing them — a second file cannot remap these).
+      - "${PG_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cmp -d equalix_go"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  equalix-go:
+    build:
+      context: .
+      args:
+        VERSION: dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      EQUALIX_DSN: postgres://cmp:x@postgres:5432/equalix_go?sslmode=disable
+      EQUALIX_API_KEY: ${EQUALIX_API_KEY:?set EQUALIX_API_KEY before up}
+      EQUALIX_MIGRATE_ON_STARTUP: "true"
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "/equalix-go", "healthcheck", "--addr", "127.0.0.1:8080"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3

@@ -173,13 +173,13 @@ This test exercises: virtual time, priority calculation, CMS in-flight estimatio
 
 ### Tasks
 
-- [ ] YAML + env config binding with defaults matching Java (`docs/configuration.md`)
-- [ ] Graceful shutdown via context cancellation
-- [ ] Prometheus metrics endpoint
-- [ ] `/healthz` and `/readyz`
-- [ ] Multi-stage Dockerfile (scratch or distroless base)
-- [ ] `docker-compose.yml` for local development
-- [ ] `docs/runbook.md`
+- [x] YAML + env config binding with defaults matching Java (`--config` + env + flags, pinned precedence; `docs/runbook.md` §4)
+- [x] Graceful shutdown via context cancellation (SIGTERM → /readyz 503 → HTTP drain → runner drain → exit 0)
+- [x] Prometheus metrics endpoint (`/metrics`, capped tenants, per-instance registry)
+- [x] `/healthz` and `/readyz` (liveness vs readiness, GAP-5 closed)
+- [x] Multi-stage Dockerfile (distroless/static:nonroot, 14.7MB)
+- [x] `docker-compose.yml` for local development (root compose: PG + service with migrate-on-startup)
+- [x] `docs/runbook.md` (startup/shutdown, NTP, config, failure modes, observability, incidents, migrate)
 
 **Definition of done:** Binary runs, smoke tests pass, metrics and health endpoints respond.
 

@@ -125,8 +125,24 @@ jobs:
           EQUALIX_JAVA_STARTUP_TIMEOUT: 5m
           EQUALIX_GO_STARTUP_TIMEOUT: 2m
         run: |
+          # /metrics snapshots feed the runbook's loaded typicals (the
+          # typicals the harness traces cannot supply — histograms live
+          # in the exporters, not results.json). curl fails silently
+          # pre-boot (|| true); files land only on HTTP 200 so empty
+          # pre-boot attempts leave no artifacts; the loop dies with the
+          # step either way. Java serves actuator, not /metrics.
+          mkdir -p ${{ github.workspace }}/results-jvg/metrics
+          (while true; do
+            ts=$(date +%s)
+            body=$(curl -sf http://127.0.0.1:18083/actuator/prometheus) && [ -n "$body" ] && echo "$body" > ${{ github.workspace }}/results-jvg/metrics/java-$ts.txt || true
+            body=$(curl -sf http://127.0.0.1:18084/metrics) && [ -n "$body" ] && echo "$body" > ${{ github.workspace }}/results-jvg/metrics/go-$ts.txt || true
+            sleep 30
+          done) &
+          SNAP=$!
           go test -count=1 -tags=differential -run 'TestLiveJavaVsGo' \
-            ./test/differential/... 2>&1 | tee compare-jvg.log; test ${PIPESTATUS[0]} -eq 0
+            ./test/differential/... 2>&1 | tee compare-jvg.log; STATUS=${PIPESTATUS[0]}
+          kill $SNAP 2>/dev/null || true
+          test $STATUS -eq 0
 
       - name: Run Go-vs-Go control
         working-directory: equalix-go
@@ -141,8 +157,18 @@ jobs:
           EQUALIX_GO_SHA: ${{ github.sha }}
           EQUALIX_GO_STARTUP_TIMEOUT: 2m
         run: |
+          mkdir -p ${{ github.workspace }}/results-gvg/metrics
+          (while true; do
+            ts=$(date +%s)
+            body=$(curl -sf http://127.0.0.1:18085/metrics) && [ -n "$body" ] && echo "$body" > ${{ github.workspace }}/results-gvg/metrics/go1-$ts.txt || true
+            body=$(curl -sf http://127.0.0.1:18086/metrics) && [ -n "$body" ] && echo "$body" > ${{ github.workspace }}/results-gvg/metrics/go2-$ts.txt || true
+            sleep 30
+          done) &
+          SNAP=$!
           go test -count=1 -tags=differential -run 'TestLiveGoVsGo' \
-            ./test/differential/... 2>&1 | tee compare-gvg.log; test ${PIPESTATUS[0]} -eq 0
+            ./test/differential/... 2>&1 | tee compare-gvg.log; STATUS=${PIPESTATUS[0]}
+          kill $SNAP 2>/dev/null || true
+          test $STATUS -eq 0
 
       - name: Publish results
         if: always()
