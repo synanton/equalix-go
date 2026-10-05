@@ -136,8 +136,17 @@ jobs:
           # just "no data" — write-on-200-only without the log would make
           # a broken scrape target indistinguishable from a quiet one.
           # Java serves actuator, not /metrics.
+          # t=0 is the loop start below (≈ step start, before either
+          # service spawns — NOT first-ingest, which is unknowable this
+          # early). t0.txt pins the wall-clock so offsets translate:
+          # absolute = t0 + offset; workload-event offset = absolute −
+          # results.json resolved.marker_{java,go}. Both T0
+          # (startup.spawn) and the markers are persisted, so the
+          # translation is recoverable from artifacts alone. One loop
+          # clock per leg, so cross-side comparison within a leg is
+          # aligned; legs have independent t0 files.
           mkdir -p ${{ github.workspace }}/results-jvg/snapshots
-          (t0=$(date +%s)
+          (t0=$(date +%s); date -u +%FT%TZ > ${{ github.workspace }}/results-jvg/snapshots/t0.txt
           snap() { # $1=url $2=outfile: write on 200, log the skip otherwise
             body=$(curl -sf "$1" || true)
             if [ -n "$body" ]; then
@@ -172,7 +181,7 @@ jobs:
           EQUALIX_GO_STARTUP_TIMEOUT: 2m
         run: |
           mkdir -p ${{ github.workspace }}/results-gvg/snapshots
-          (t0=$(date +%s)
+          (t0=$(date +%s); date -u +%FT%TZ > ${{ github.workspace }}/results-gvg/snapshots/t0.txt
           snap() {
             body=$(curl -sf "$1" || true)
             if [ -n "$body" ]; then
