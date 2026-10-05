@@ -137,8 +137,8 @@ func TestWarmupFromEnv(t *testing.T) {
 	t.Setenv("EQUALIX_WARMUP_TASKS", "500")
 	t.Setenv("EQUALIX_WARMUP_RPS", "bogus")
 	cfg = WarmupFromEnv()
-	if cfg.Tasks != 500 || cfg.RPS != 15 || cfg.Class() != "warm-500-rps15" {
-		t.Fatalf("parsed = %+v, want warm-500 with RPS fallback", cfg)
+	if cfg.Tasks != 500 || cfg.RPS != 15 || cfg.Class() != "warm-500-p8-rps15" {
+		t.Fatalf("parsed = %+v, want warm-500 paced-8 with RPS fallback", cfg)
 	}
 }
 // for a real scheduler: fresh stub, ingest with marker capture, drain to

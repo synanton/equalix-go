@@ -22,22 +22,28 @@ import (
 // cold avalanche is a workload-shape effect, and JvG-warm vs GvG-cold
 // would measure the workload, not the implementations.
 //
-// Env: EQUALIX_WARMUP_TASKS (default 0), EQUALIX_WARMUP_RPS (default 15),
-// EQUALIX_WARMUP_TIMEOUT (default 180s).
+// Env: EQUALIX_WARMUP_TASKS (default 0), EQUALIX_WARMUP_PACE (default 8/s),
+// EQUALIX_WARMUP_RPS (default 15), EQUALIX_WARMUP_TIMEOUT (default 300s).
 type WarmupConfig struct {
-	Tasks   int
-	RPS     float64
-	Timeout time.Duration
+	Tasks      int
+	PacePerSec float64
+	RPS        float64
+	Timeout    time.Duration
 }
 
 // WarmupFromEnv reads the warm-up class knobs. Unset or unparseable means
 // cold (Tasks 0) — a mistyped knob degrades to the historical behavior,
 // never to a half-warmed run.
 func WarmupFromEnv() WarmupConfig {
-	cfg := WarmupConfig{RPS: 15, Timeout: 180 * time.Second}
+	cfg := WarmupConfig{PacePerSec: 8, RPS: 15, Timeout: 300 * time.Second}
 	if v := os.Getenv("EQUALIX_WARMUP_TASKS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.Tasks = n
+		}
+	}
+	if v := os.Getenv("EQUALIX_WARMUP_PACE"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			cfg.PacePerSec = f
 		}
 	}
 	if v := os.Getenv("EQUALIX_WARMUP_RPS"); v != "" {
@@ -58,7 +64,7 @@ func (c WarmupConfig) Class() string {
 	if c.Tasks <= 0 {
 		return "cold"
 	}
-	return fmt.Sprintf("warm-%d-rps%.0f", c.Tasks, c.RPS)
+	return fmt.Sprintf("warm-%d-p%.0f-rps%.0f", c.Tasks, c.PacePerSec, c.RPS)
 }
 
 // RunWarmup submits cfg.Tasks throwaway tasks (synthetic IDs, workload
@@ -68,6 +74,13 @@ func (c WarmupConfig) Class() string {
 // the RPS ramp out of the measurement window: cold runs intermittently
 // avalanche window 0 (spec NOTE, promotion asymmetry); warm runs measure
 // the controller at operating RPS on both sides.
+//
+// Submission is PACED, not burst: an instant burst piles queueing delay
+// onto every completion, the latency signal reads above target, and the
+// controller holds RPS down for as long as the backlog persists (observed:
+// 500-burst stalled Java at RPS 2.2 for the full gate timeout). Paced at a
+// rate the early controller sustains, queueing stays near zero, completions
+// report stub latency (~100ms < target), and every evaluation steps UP.
 func RunWarmup(ctx context.Context, client *http.Client, svc SideConfig, apiKey string, workload []Task, stub *Stub, cfg WarmupConfig) (int, error) {
 	tenants := []string{}
 	weights := map[string]float64{}
@@ -80,8 +93,19 @@ func RunWarmup(ctx context.Context, client *http.Client, svc SideConfig, apiKey 
 	if len(tenants) == 0 {
 		return 0, fmt.Errorf("differential: side %s warmup needs workload tenants", svc.Name)
 	}
+	interval := time.Second / time.Duration(cfg.PacePerSec)
+	if interval <= 0 {
+		interval = time.Second
+	}
 	svcIDs := map[string]string{}
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
 	for i := 0; i < cfg.Tasks; i++ {
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-tick.C:
+		}
 		tenant := tenants[i%len(tenants)]
 		wt := Task{ID: fmt.Sprintf("warm-%s-%d", svc.Name, i), Tenant: tenant, Weight: weights[tenant]}
 		_, svcID, err := SubmitTask(ctx, client, svc.BaseURL, apiKey, wt, time.Now())
