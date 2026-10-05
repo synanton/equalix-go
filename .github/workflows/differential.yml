@@ -27,11 +27,26 @@ on:
         description: "Workload file under test/differential/workloads"
         default: "w127.jsonl"
         required: true
+      warmup_tasks:
+        description: "Warm-up pre-phase tasks (0 = cold characterization class)"
+        default: "500"
+        required: false
+      warmup_rps:
+        description: "RPS floor the warm-up trickle gates on"
+        default: "15"
+        required: false
 
 jobs:
   compare:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      # Warm class is the parity gate, so CI runs warm by default; cold is
+      # a dispatch-only characterization run (set warmup_tasks: 0). Empty
+      # on schedule events, hence the literal fallbacks.
+      EQUALIX_WARMUP_TASKS: ${{ github.event.inputs.warmup_tasks || '500' }}
+      EQUALIX_WARMUP_RPS: ${{ github.event.inputs.warmup_rps || '15' }}
+      EQUALIX_WARMUP_PACE: "8"
     steps:
       - uses: actions/checkout@v4
         with:
