@@ -277,6 +277,12 @@ func countSQL(entries []fs.DirEntry) int {
 // known migration file (applied versions, excluding goose's own baseline
 // row, >= file count). Partial application reads as not-ready, never as
 // ready-with-fewer — a half-migrated schema must not serve traffic.
+// Edge cases, pinned: fresh DB (no version table → query error →
+// not-ready naming "migrations"); binary older than DB (applied >
+// expected → ready — the binary needs only its known tables, extra
+// versions are forward-compatible until proven otherwise). Same file
+// source as the migrate path (embedded FS or --migrations-dir) — the
+// check and the migrator can never disagree on the denominator.
 func migrationsApplied(ctx context.Context, pool *pgxpool.Pool, expected int) (bool, error) {
 	var n int
 	if err := pool.QueryRow(ctx,
