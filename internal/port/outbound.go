@@ -40,21 +40,40 @@ type Executor interface {
 // Exact wire names are decided in EQLX-6; the data carried here is fixed
 // now: tenant/result labels travel with the calls (labels are data, not
 // wire names), while cardinality caps and names stay adapter config.
+// Wire-name strings live ONLY in internal/adapter/metrics (single source
+// of truth) — no equalix_* literals anywhere else, not even in comments:
+// logical names below (dispatch decision latency, …), wire names there.
+// Timeout/watchdog/cms-warmup observations joined in EQLX-6 (spec NOTE:
+// Prometheus metric naming) — a port change with its rationale recorded,
+// not scope creep: the EQLX-4 logical names needed wire homes and the
+// interface is where observations enter.
 type Metrics interface {
-	// RecordDispatch counts one dispatch (equalix_tasks_dispatched_total
+	// RecordDispatch counts one dispatch (tasks-dispatched counter
 	// source, labeled by tenant).
 	RecordDispatch(tenant string)
 	// RecordCompletion counts one terminal completion
-	// (equalix_tasks_completed_total source, labeled by tenant and result;
+	// (tasks-completed counter source, labeled by tenant and result;
 	// result is "success", "failed", or "timeout").
 	RecordCompletion(tenant, result string, durationMs int64)
-	// ObserveDispatchLatency records dispatch latency
-	// (equalix_dispatch_latency_seconds source).
+	// ObserveDispatchLatency records dispatch-decision latency: the
+	// selection-query cost (priority compute + select live in the
+	// dispatchable query; saves and clock advances are bookkeeping).
 	ObserveDispatchLatency(seconds float64)
+	// ObserveTimeoutLatency records timeout-detection latency per expired
+	// task: time from deadline expiry (updated_at + task_timeout) to the
+	// TIMEOUT marking, floored at 0. Definition pinned: detection delay,
+	// not dispatch-to-TIMEOUT — the sweep-responsiveness signal. Clock
+	// basis follows the §13 clock NOTE (app-side now minus DB-stamped
+	// updated_at, the established parity choice).
+	ObserveTimeoutLatency(seconds float64)
+	// ObserveWatchdogReconciliation records one watchdog tick duration.
+	ObserveWatchdogReconciliation(seconds float64)
+	// ObserveCMSWarmup records the startup sketch-rebuild duration.
+	ObserveCMSWarmup(seconds float64)
 	// SetRPS publishes the adaptive controller's current cap (gauge source).
 	SetRPS(rps float64)
 	// SetQueueDepth publishes the RECEIVED backlog size
-	// (received_queue_depth gauge source). Sampled by the calculator only
+	// (queue-depth gauge source). Sampled by the calculator only
 	// on saturated ticks, never on the hot path.
 	SetQueueDepth(n int)
 	// PublishDrift publishes a watchdog drift report: per-key drift plus

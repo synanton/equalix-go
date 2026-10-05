@@ -278,6 +278,9 @@ type fakeMetrics struct{}
 func (fakeMetrics) RecordDispatch(string)                  {}
 func (fakeMetrics) RecordCompletion(string, string, int64) {}
 func (fakeMetrics) ObserveDispatchLatency(float64)         {}
+func (fakeMetrics) ObserveTimeoutLatency(float64)          {}
+func (fakeMetrics) ObserveWatchdogReconciliation(float64)  {}
+func (fakeMetrics) ObserveCMSWarmup(float64)               {}
 func (fakeMetrics) SetRPS(float64)                         {}
 func (fakeMetrics) PublishDrift(map[string]int64)          {}
 func (fakeMetrics) SetQueueDepth(int)                      {}

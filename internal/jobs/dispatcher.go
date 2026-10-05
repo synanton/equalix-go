@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/synanton/equalix-go/internal/domain"
 	"github.com/synanton/equalix-go/internal/port"
@@ -112,8 +113,11 @@ func (d *Dispatcher) tick(ctx context.Context) error {
 	}
 
 	var selected []*domain.Task
+	var selectElapsed time.Duration
 	err = d.deps.Tx.Transact(ctx, func(tx port.TxPorts) error {
+		qStart := time.Now()
 		tasks, err := tx.Tasks.FindAndLockDispatchable(ctx, free, cfg.MaxPerClientQuota)
+		selectElapsed = time.Since(qStart)
 		if err != nil {
 			return err
 		}
@@ -139,6 +143,12 @@ func (d *Dispatcher) tick(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Dispatch-decision latency: the selection-query cost above (the
+	// EQLX-4 hot-path signal — priority compute + select live in that
+	// query on this side; saves and clock advances are bookkeeping, not
+	// the decision). Observed post-commit: metric writes never run
+	// inside the transaction.
+	d.deps.Metrics.ObserveDispatchLatency(selectElapsed.Seconds())
 
 	// Post-commit: CMS, metrics, async send. Executor errors leave the
 	// task DISPATCHED for the timeout sweep (Java parity — the sweep is a

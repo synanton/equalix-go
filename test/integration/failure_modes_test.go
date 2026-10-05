@@ -21,6 +21,9 @@ type driftRecorder struct {
 func (d *driftRecorder) RecordDispatch(string)                  {}
 func (d *driftRecorder) RecordCompletion(string, string, int64) {}
 func (d *driftRecorder) ObserveDispatchLatency(float64)         {}
+func (d *driftRecorder) ObserveTimeoutLatency(float64)          {}
+func (d *driftRecorder) ObserveWatchdogReconciliation(float64)  {}
+func (d *driftRecorder) ObserveCMSWarmup(float64)               {}
 func (d *driftRecorder) SetRPS(float64)                         {}
 func (d *driftRecorder) SetQueueDepth(int)                      {}
 func (d *driftRecorder) PublishDrift(m map[string]int64) {
@@ -255,6 +258,9 @@ type gaugeMetrics struct {
 func (g *gaugeMetrics) RecordDispatch(string)                  {}
 func (g *gaugeMetrics) RecordCompletion(string, string, int64) {}
 func (g *gaugeMetrics) ObserveDispatchLatency(float64)         {}
+func (g *gaugeMetrics) ObserveTimeoutLatency(float64)          {}
+func (g *gaugeMetrics) ObserveWatchdogReconciliation(float64)  {}
+func (g *gaugeMetrics) ObserveCMSWarmup(float64)               {}
 func (g *gaugeMetrics) SetRPS(float64)                         {}
 func (g *gaugeMetrics) PublishDrift(map[string]int64)          {}
 func (g *gaugeMetrics) SetQueueDepth(n int) {

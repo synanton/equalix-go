@@ -19,6 +19,7 @@ type TimeoutDeps struct {
 	Counts    port.CountsRepository
 	Sequences port.SequenceStateRepository
 	CMS       port.CMSStore
+	Metrics   port.Metrics
 	Config    Config
 	Log       *slog.Logger
 	Clock     domain.Clock
@@ -33,6 +34,9 @@ type Timeout struct {
 func NewTimeout(d TimeoutDeps) *Timeout {
 	if d.Log == nil {
 		d.Log = slog.Default()
+	}
+	if d.Metrics == nil {
+		d.Metrics = discardMetrics{}
 	}
 	return &Timeout{deps: d}
 }
@@ -72,7 +76,8 @@ func (s *Timeout) tick(ctx context.Context) error {
 	now := s.now()
 	expired := 0
 	for _, t := range timedOut {
-		if err := s.expireOne(ctx, t, now); err != nil {
+		done, err := s.expireOne(ctx, t, now)
+		if err != nil {
 			// Version conflict: concurrent mover won; skip, count the
 			// rest. Anything else aborts the tick (recoverable via Loop).
 			if errors.Is(err, port.ErrVersionConflict) {
@@ -81,7 +86,9 @@ func (s *Timeout) tick(ctx context.Context) error {
 			}
 			return fmt.Errorf("timeout sweep: %w", err)
 		}
-		expired++
+		if done {
+			expired++
+		}
 	}
 	if expired > 0 {
 		s.deps.Log.Warn("expired in-flight tasks as TIMEOUT", "count", expired)
@@ -89,10 +96,11 @@ func (s *Timeout) tick(ctx context.Context) error {
 	return nil
 }
 
-func (s *Timeout) expireOne(ctx context.Context, t *domain.Task, now time.Time) error {
+func (s *Timeout) expireOne(ctx context.Context, t *domain.Task, now time.Time) (bool, error) {
 	if !t.Status.IsInFlight() {
-		return nil
+		return false, nil
 	}
+	expired := false
 	err := s.deps.Tx.Transact(ctx, func(tx port.TxPorts) error {
 		cur, err := tx.Tasks.FindByID(ctx, t.ID)
 		if err != nil {
@@ -113,10 +121,22 @@ func (s *Timeout) expireOne(ctx context.Context, t *domain.Task, now time.Time) 
 		t.Sequential = cur.Sequential
 		t.SequenceNumber = cur.SequenceNumber
 		t.FairnessKey = cur.FairnessKey
+		expired = true
 		return nil
 	})
 	if err != nil {
-		return err
+		return false, err
+	}
+	if !expired {
+		return false, nil // raced inside tx; mover owns it
+	}
+	// Timeout-detection latency: deadline expiry (pre-save updated_at +
+	// task_timeout) to the TIMEOUT marking, floored at 0. Definition per
+	// the port contract: sweep responsiveness, not dispatch-to-TIMEOUT.
+	if delay := now.Sub(t.UpdatedAt.Add(s.deps.Config.TaskTimeout)); delay > 0 {
+		s.deps.Metrics.ObserveTimeoutLatency(delay.Seconds())
+	} else {
+		s.deps.Metrics.ObserveTimeoutLatency(0)
 	}
 	// Post-commit: CMS release. A crash here is window (2) — the next
 	// watchdog rebuild corrects it (structural, §8).
@@ -126,7 +146,7 @@ func (s *Timeout) expireOne(ctx context.Context, t *domain.Task, now time.Time) 
 	if t.Sequential {
 		st, err := s.deps.Sequences.FindOrCreate(ctx, t.FairnessKey)
 		if err != nil {
-			return err
+			return false, err
 		}
 		st.OnFailure(now)
 		// The stuck task stays recorded as executing until block recovery
@@ -134,10 +154,10 @@ func (s *Timeout) expireOne(ctx context.Context, t *domain.Task, now time.Time) 
 		st.CurrentExecutingID = t.ID
 		st.HasExecuting = true
 		if err := s.deps.Sequences.Save(ctx, st); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func (s *Timeout) now() time.Time {

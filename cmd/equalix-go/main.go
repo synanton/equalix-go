@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -22,11 +23,11 @@ import (
 
 	executor "github.com/synanton/equalix-go/internal/adapter/executor"
 	chiadapter "github.com/synanton/equalix-go/internal/adapter/http"
+	promadapter "github.com/synanton/equalix-go/internal/adapter/metrics"
 	pgadapter "github.com/synanton/equalix-go/internal/adapter/postgres"
 	"github.com/synanton/equalix-go/internal/adaptive"
 	"github.com/synanton/equalix-go/internal/domain"
 	"github.com/synanton/equalix-go/internal/jobs"
-	"github.com/synanton/equalix-go/internal/port"
 	"github.com/synanton/equalix-go/pkg/cms"
 )
 
@@ -69,39 +70,32 @@ func (c *localCMS) Rebuild(_ context.Context, m map[string]int64) error {
 	return nil
 }
 
-// memMetrics records telemetry in memory until EQLX-6 Prometheus.
-// Not for benchmark paths: single global mutex + maps would flatten any
-// measurement it touches. EQLX-6 replaces with per-shard counters.
-type memMetrics struct {
-	mu          sync.Mutex
-	dispatches  map[string]int
-	completions map[string]int
-	rps         float64
-}
-
-func (m *memMetrics) RecordDispatch(t string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.dispatches[t]++
-}
-
-func (m *memMetrics) RecordCompletion(t, r string, _ int64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.completions[t+"/"+r]++
-}
-
-func (m *memMetrics) ObserveDispatchLatency(_ float64) {}
-func (m *memMetrics) SetRPS(r float64)                 { m.mu.Lock(); m.rps = r; m.mu.Unlock() }
-func (m *memMetrics) PublishDrift(_ map[string]int64)  {}
-func (m *memMetrics) SetQueueDepth(_ int)              {}
-
+// toInt64 converts the CMS warm-up snapshot to the sketch's input type.
 func toInt64(m map[string]int) map[string]int64 {
 	out := make(map[string]int64, len(m))
 	for k, v := range m {
 		out[k] = int64(v)
 	}
 	return out
+}
+
+// envOr reads a string env with fallback; envIntOr the same for ints
+// (unparseable falls back — a mistyped metrics knob degrades to the
+// default, never to a zero cap that would drop every labeled sample).
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func envIntOr(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fallback
 }
 
 func run() error {
@@ -114,11 +108,14 @@ func run() error {
 	}
 	milestone("main-entry")
 	var (
-		dsn        = flag.String("dsn", os.Getenv("EQUALIX_DSN"), "PostgreSQL DSN (or EQUALIX_DSN)")
-		addr       = flag.String("addr", ":8080", "HTTP listen address")
-		apiKey     = flag.String("api-key", os.Getenv("EQUALIX_API_KEY"), "API key, prefer EQUALIX_API_KEY env (flag value is visible in ps)")
-		maxPayload = flag.Int("max-payload-bytes", 1048576, "ingest payload cap (Java app.queue.max-payload-bytes)")
-		execBase   = flag.String("executor-base-url", os.Getenv("EQUALIX_EXECUTOR_BASE_URL"), "executor base URL receiving POST /tasks/{id}/execute (or EQUALIX_EXECUTOR_BASE_URL)")
+		dsn         = flag.String("dsn", os.Getenv("EQUALIX_DSN"), "PostgreSQL DSN (or EQUALIX_DSN)")
+		addr        = flag.String("addr", ":8080", "HTTP listen address")
+		apiKey      = flag.String("api-key", os.Getenv("EQUALIX_API_KEY"), "API key, prefer EQUALIX_API_KEY env (flag value is visible in ps)")
+		maxPayload  = flag.Int("max-payload-bytes", 1048576, "ingest payload cap (Java app.queue.max-payload-bytes)")
+		execBase    = flag.String("executor-base-url", os.Getenv("EQUALIX_EXECUTOR_BASE_URL"), "executor base URL receiving POST /tasks/{id}/execute (or EQUALIX_EXECUTOR_BASE_URL)")
+		metricsPath = flag.String("metrics-path", envOr("EQUALIX_METRICS_PATH", "/metrics"), "Prometheus exposition path on the service mux (operators: do not expose publicly)")
+		tenantCap   = flag.Int("metrics-tenant-cap", envIntOr("EQUALIX_METRICS_TENANT_CAP", 1000), "distinct tenants per tenant-labeled metric; beyond the cap samples drop and count as cardinality-exceeded")
+		driftKeys   = flag.Int("metrics-drift-max-keys", envIntOr("EQUALIX_METRICS_DRIFT_MAX_KEYS", 1000), "per-report drift series cap (sorted truncation)")
 	)
 	flag.Parse()
 
@@ -150,7 +147,10 @@ func run() error {
 	}
 	defer locker.Close()
 
-	metrics := &memMetrics{dispatches: map[string]int{}, completions: map[string]int{}}
+	metrics, err := promadapter.New(promadapter.Config{TenantCap: *tenantCap, DriftMaxKeys: *driftKeys})
+	if err != nil {
+		return fmt.Errorf("metrics: %w", err)
+	}
 	cmsketch := &localCMS{s: cms.New(65536, 5)}
 	// Throttle owns its own send pool as the FailedSends source
 	// (DECISION-5 wiring: pool → controller, no wrapper).
@@ -162,6 +162,7 @@ func run() error {
 	handler := chiadapter.NewRouter(chiadapter.Deps{
 		Tasks: stores.Tasks, Counts: stores.Counts, Sequences: stores.Sequences,
 		CMS: cmsketch, Metrics: metrics,
+		MetricsPath: *metricsPath, MetricsHandler: metrics.Handler(),
 		RPS: controller, Throttle: controller, Clock: domain.SystemClock{},
 		APIKey: *apiKey, MaxPayloadBytes: *maxPayload,
 	})
@@ -201,6 +202,7 @@ func run() error {
 	// CMS warm-up (Java parity: CmsWarmUpListener): rebuild the sketch
 	// from in-flight rows WITHOUT publishing drift — an empty sketch at
 	// startup would otherwise read as underestimate for every key.
+	warmStart := time.Now()
 	if actual, err := stores.Tasks.CountInFlight(ctx); err != nil {
 		return fmt.Errorf("warm-up snapshot: %w", err)
 	} else if err := cmsketch.Rebuild(ctx, toInt64(actual)); err != nil {
@@ -208,6 +210,7 @@ func run() error {
 	} else {
 		slog.Info("cms warmed up", "keys", len(actual))
 	}
+	metrics.ObserveCMSWarmup(time.Since(warmStart).Seconds())
 	milestone("readiness-ok")
 
 	// Dispatcher needs an executor to send to. Without --executor-base-url
@@ -226,7 +229,8 @@ func run() error {
 		jobs.NewTimeout(jobs.TimeoutDeps{
 			Tx: stores, Tasks: stores.Tasks, Counts: stores.Counts,
 			Sequences: stores.Sequences, CMS: cmsketch,
-			Config: cfg, Clock: domain.SystemClock{},
+			Metrics: metrics,
+			Config:  cfg, Clock: domain.SystemClock{},
 		}),
 	}
 	if *execBase != "" {
@@ -283,5 +287,3 @@ func run() error {
 		return <-runErr
 	}
 }
-
-var _ port.Metrics = (*memMetrics)(nil)
