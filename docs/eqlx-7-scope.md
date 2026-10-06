@@ -68,8 +68,15 @@ pending and no home phase to put them in).
    AND zipfian (uniform overstates CMS accuracy for bursty real
    workloads — at minimum one zipfian run); error metric = per-key
    relative error distribution (p50/p99/max) plus mean absolute.
-   Conformance-level, no live pair needed (Java's CMS params are
-   known). Closes the residual as a curve, not a bound. Output: table
+   Regime derivation (CORRECTION-5 pattern — state what exercises the
+   mechanism): sketch error is a function of cardinality ×
+   distribution, not request rate — rate is irrelevant here, which is
+   why this residual needs no live pair and no RPS regime at all.
+   Conformance-level (Java's CMS params are known). Closes the
+   residual as a curve, not a bound. Golden
+   `pkg/cms/testdata/cms-curve.json` with drift-fail; regenerate via
+   `make regen-cms-curve` only alongside an intentional algorithm
+   change. Output: table
    (cardinality × distribution × error metric) plus the raw JSON that
    produced it (plotted curve optional — the JSON is the citable part).
 4. **Java cold-startup cell: documented blocked, not scheduled.** Needs
