@@ -46,14 +46,21 @@ pending and no home phase to put them in).
    negative result (why warm pacing cannot work — contention
    requirement) so nobody re-tries it.
 2. **Idle-tenant credit: parity check, not just characterization.** A
-   tenant idle for the first half, active for the second — run as a
-   JvG + GvG warm-class pair, in BOTH floor regimes: above floor
-   (controller unpinned, tenant drains — the run where parity is
-   actually observable) and below floor (control proving the floor
-   does its job; a below-floor-only residual would document vacuous
-   parity). Divergence here is mechanism evidence for the
-   virtual-time NOTE family with a parity interpretation (not a gate —
-   N=1 pair each, below the rate-criterion sample floor). Output:
+   tenant idle, then returning — run as a JvG + GvG pair, in BOTH
+   floor regimes: above floor (controller unpinned, tenant drains —
+   the run where parity is actually observable) and below floor
+   (control proving the floor does its job; a below-floor-only
+   residual would document vacuous parity). Class: COLD for both
+   (corrected after the warm attempt — a warm-up trickle drives RPS
+   to ceiling, and uncontended arrival-order replay answers nothing
+   about the clamp; JvG-warm idle produced byte-identical 140/70/191
+   windows on both sides at RPS 100, i.e. file-mix replay). Cold
+   keeps the return inside the ramp (budget < arrival), which is the
+   only regime where tag position decides anything. Return placed
+   early (~25s, RPS ~3-6) so contention is deep, not marginal.
+   Divergence here is mechanism evidence for the virtual-time NOTE
+   family with a parity interpretation (not a gate — N=1 pair each,
+   below the rate-criterion sample floor). Output:
    `docs/evidence/eqlx-7-idle-tenant.md` in the EQLX-5 evidence shape,
    N-caveat as the header.
 3. **CMS error curve.** Sketch estimate vs actual with three pinned

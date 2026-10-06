@@ -93,6 +93,7 @@ func (t *Tracer) sample(sides map[string]Side, _ string) {
 		// RPS -1 = no reading (not zero — zero is a real throttle floor
 		// value and must never be confused with a missed sample).
 		p.TotalDispatched, p.Promoted = fetchCounts(s)
+		p.V = fetchV(s)
 		t.mu.Lock()
 		t.points[name] = append(t.points[name], p)
 		t.mu.Unlock()
@@ -144,6 +145,25 @@ func fetchCounts(s Side) (dispatched, promoted int) {
 	_ = conn.QueryRow(ctx, `SELECT COUNT(*) FROM tasks WHERE status <> 'RECEIVED'`).Scan(&dispatched)
 	_ = conn.QueryRow(ctx, `SELECT COUNT(*) FROM tasks WHERE priority <= 0`).Scan(&promoted)
 	return dispatched, promoted
+}
+
+// fetchV reads the scheduler system virtual clock (single row, id 1).
+// -1 when unreadable: absent table pre-migration, connection refused,
+// decode failure — same sentinel discipline as RPS (a missing V is a
+// missing reading, never V=0, which would read as "clock reset").
+func fetchV(s Side) float64 {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, s.DSN)
+	if err != nil {
+		return -1
+	}
+	defer conn.Close(ctx)
+	var v float64
+	if err := conn.QueryRow(ctx, `SELECT virtual_time FROM scheduler_virtual_clock WHERE id = 1`).Scan(&v); err != nil {
+		return -1
+	}
+	return v
 }
 
 // FetchStats returns the per-side /status fetch record (miss count, first

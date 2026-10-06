@@ -145,6 +145,48 @@ func TestWarmupFromEnv(t *testing.T) {
 // for a real scheduler: fresh stub, ingest with marker capture, drain to
 // terminal, Close-captured log, offset translation. The live pipeline with
 // none of the live processes.
+// TestHonorOffsetsPacesSubmits drives RunSide with offset-honoring on:
+// three tasks at 0/300/600ms must arrive spaced, in file order. Default
+// mode (existing TestLiveRunAgainstFakes) ignores offsets entirely.
+func TestHonorOffsetsPacesSubmits(t *testing.T) {
+	t.Setenv("EQUALIX_HONOR_OFFSETS", "1")
+	ctx := context.Background()
+	fake := newFakeScheduler("", "k")
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	stub, err := NewStub(StubConfig{
+		Port: 0, Latency: LatencyConfig{Shape: LatencyFixed, BaseMs: 20, Seed: 1},
+		CompleteBase: srv.URL, APIKey: "k",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stubAddr, err := stub.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.setStub("http://" + stubAddr)
+
+	svc := SideConfig{Name: "fake", BaseURL: srv.URL, DSN: "", HTTPPort: 1, APIKey: "k"}
+	workload := []Task{
+		{ID: "t-a-0", Tenant: "a", Weight: 1, CreatedAtOffsetMs: 0, SubmittedAtOffsetMs: 0, PayloadBytes: 4},
+		{ID: "t-b-0", Tenant: "b", Weight: 2, CreatedAtOffsetMs: 300, SubmittedAtOffsetMs: 300, PayloadBytes: 4},
+		{ID: "t-c-0", Tenant: "c", Weight: 7, CreatedAtOffsetMs: 600, SubmittedAtOffsetMs: 600, PayloadBytes: 4},
+	}
+	start := time.Now()
+	res, err := RunSide(ctx, svc, "k", workload, stub, 30*time.Second, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed < 550*time.Millisecond {
+		t.Fatalf("honor mode submitted 600ms of offsets in %v", elapsed)
+	}
+	if len(res.Log.Order) != 3 {
+		t.Fatalf("dispatch log = %+v, want 3 dispatches", res.Log.Order)
+	}
+}
+
 // TestLiveRunAgainstFakes drives RunSide end to end with fakes standing in
 // for a real scheduler: fresh stub, ingest with marker capture, drain to
 // terminal, Close-captured log, offset translation. The live pipeline with

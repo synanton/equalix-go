@@ -248,24 +248,52 @@ func TestLiveJavaVsGo(t *testing.T) {
 	// Mismatches are RECORDED, not fatalf'd here: the artifact must publish
 	// even on divergence (a mismatch with classification is the whole
 	// point of results.json); the verdict fatalf's after WriteResult.
+	// Idle-tenant runs (EQUALIX_IDLE_TENANT set) skip the shares gate
+	// entirely: a phased workload starves a tenant by design, so
+	// per-window shares vs 1:2:7 are meaningless. The observable is the
+	// return window below — recorded, never gated (N=1 pair each).
+	idleTenant := os.Getenv("EQUALIX_IDLE_TENANT")
+	var idleReturnMs int64
+	if idleTenant != "" {
+		if v := os.Getenv("EQUALIX_IDLE_RETURN_MS"); v != "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 {
+				t.Fatalf("EQUALIX_IDLE_RETURN_MS unparseable: %q", v)
+			}
+			idleReturnMs = n
+		}
+	}
 	var mm *Mismatch
-	for _, side := range []struct {
-		name string
-		log  RunLog
-	}{{"java", java.Log}, {"go", goRes.Log}} {
-		results, m := CompareShares(side.log, 1000, 2)
-		if FullWindows(results) == 0 {
-			t.Logf("%s shares recorded (no full window — gate not applied): %s", side.name, summarize(side.log))
-			continue
+	var idle *IdleResult
+	if idleTenant != "" {
+		idle = &IdleResult{Tenant: idleTenant, ReturnMs: idleReturnMs, Window: map[string]map[string]int{}}
+		for _, side := range []struct {
+			name string
+			res  SideResult
+		}{{"java", java}, {"go", goRes}} {
+			counts, seq := IdleWindow(side.res.Log, side.res.Marker, idleTenant, idleReturnMs, 1000)
+			idle.Window[side.name] = counts
+			t.Logf("idle %s: return window (from seq %d): %v", side.name, seq, counts)
 		}
-		if m != nil && mm == nil {
-			mm = m
-		}
-		// Numeric deviations per tenant, win or lose — "shares matched" is
-		// not a result, numbers against the bound are.
-		for _, w := range results {
-			if w.Full {
-				t.Logf("%s window %d deviations: %v (bound ±2)", side.name, w.Window, w.Deviations)
+	} else {
+		for _, side := range []struct {
+			name string
+			log  RunLog
+		}{{"java", java.Log}, {"go", goRes.Log}} {
+			results, m := CompareShares(side.log, 1000, 2)
+			if FullWindows(results) == 0 {
+				t.Logf("%s shares recorded (no full window — gate not applied): %s", side.name, summarize(side.log))
+				continue
+			}
+			if m != nil && mm == nil {
+				mm = m
+			}
+			// Numeric deviations per tenant, win or lose — "shares matched" is
+			// not a result, numbers against the bound are.
+			for _, w := range results {
+				if w.Full {
+					t.Logf("%s window %d deviations: %v (bound ±2)", side.name, w.Window, w.Deviations)
+				}
 			}
 		}
 	}
@@ -307,6 +335,9 @@ func TestLiveJavaVsGo(t *testing.T) {
 		paceStr = fmt.Sprintf("paced-%.0f/s", pace)
 	}
 	method := "EQLX-5 real01 [" + warmCfg.Class() + "]: " + wl + " (200/400/1400, 1:2:7) fixed-100ms stub, " + paceStr
+	if idleTenant != "" {
+		method += fmt.Sprintf(", idle-%s-return@%dms", idleTenant, idleReturnMs)
+	}
 	traces := tracer.Stop()
 	fetch := tracer.FetchStats()
 	for side, pts := range traces {
@@ -332,7 +363,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 		Resolved: resolved, JavaSHA: shaOr("EQUALIX_JAVA_SHA", "java-unrecorded"), GoSHA: shaOr("EQUALIX_GO_SHA", "go-unrecorded"), Calibration: calibration, Traces: traces, Fetch: fetch,
 		Warmup:   map[string]int{"java": java.Warmup, "go": goRes.Warmup},
 		Prephase: map[string]int{"java": java.PrephaseDispatched, "go": goRes.PrephaseDispatched},
-		Startup:  startup, MM: mm}); err != nil {
+		Startup:  startup, Idle: idle, MM: mm}); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("java shares: %s", summarize(java.Log))
@@ -441,22 +472,47 @@ func TestLiveGoVsGo(t *testing.T) {
 	g2 := runGo("go2", "http://127.0.0.1:18086", 18086, 18096, dsn2)
 	// Shares gate, same rule as the Java-vs-Go leg: full 1000-windows only,
 	// mismatches recorded into the artifact, verdict after WriteResult.
+	// Idle-tenant runs skip the gate like the JvG leg (record-only).
+	idleTenant := os.Getenv("EQUALIX_IDLE_TENANT")
+	var idleReturnMs int64
+	if idleTenant != "" {
+		if v := os.Getenv("EQUALIX_IDLE_RETURN_MS"); v != "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 {
+				t.Fatalf("EQUALIX_IDLE_RETURN_MS unparseable: %q", v)
+			}
+			idleReturnMs = n
+		}
+	}
 	var mm *Mismatch
-	for _, side := range []struct {
-		name string
-		log  RunLog
-	}{{"go1", g1.Log}, {"go2", g2.Log}} {
-		results, m := CompareShares(side.log, 1000, 2)
-		if FullWindows(results) == 0 {
-			t.Logf("%s shares recorded (no full window — gate not applied): %s", side.name, summarize(side.log))
-			continue
+	var idle *IdleResult
+	if idleTenant != "" {
+		idle = &IdleResult{Tenant: idleTenant, ReturnMs: idleReturnMs, Window: map[string]map[string]int{}}
+		for _, side := range []struct {
+			name string
+			res  SideResult
+		}{{"go1", g1}, {"go2", g2}} {
+			counts, seq := IdleWindow(side.res.Log, side.res.Marker, idleTenant, idleReturnMs, 1000)
+			idle.Window[side.name] = counts
+			t.Logf("idle %s: return window (from seq %d): %v", side.name, seq, counts)
 		}
-		if m != nil && mm == nil {
-			mm = m
-		}
-		for _, w := range results {
-			if w.Full {
-				t.Logf("%s window %d deviations: %v (bound ±2)", side.name, w.Window, w.Deviations)
+	} else {
+		for _, side := range []struct {
+			name string
+			log  RunLog
+		}{{"go1", g1.Log}, {"go2", g2.Log}} {
+			results, m := CompareShares(side.log, 1000, 2)
+			if FullWindows(results) == 0 {
+				t.Logf("%s shares recorded (no full window — gate not applied): %s", side.name, summarize(side.log))
+				continue
+			}
+			if m != nil && mm == nil {
+				mm = m
+			}
+			for _, w := range results {
+				if w.Full {
+					t.Logf("%s window %d deviations: %v (bound ±2)", side.name, w.Window, w.Deviations)
+				}
 			}
 		}
 	}
@@ -499,6 +555,9 @@ func TestLiveGoVsGo(t *testing.T) {
 		}
 		return "burst"
 	}()
+	if idleTenant != "" {
+		method += fmt.Sprintf(", idle-%s-return@%dms", idleTenant, idleReturnMs)
+	}
 	traces := tracer.Stop()
 	fetch := tracer.FetchStats()
 	for side, pts := range traces {
@@ -525,7 +584,7 @@ func TestLiveGoVsGo(t *testing.T) {
 		Resolved: resolved, JavaSHA: goSHA, GoSHA: goSHA, Calibration: calibration, Traces: traces, Fetch: fetch,
 		Warmup:   map[string]int{"go1": g1.Warmup, "go2": g2.Warmup},
 		Prephase: map[string]int{"go1": g1.PrephaseDispatched, "go2": g2.PrephaseDispatched},
-		Startup:  startup, MM: mm}); err != nil {
+		Startup:  startup, Idle: idle, MM: mm}); err != nil {
 		t.Fatal(err)
 	}
 	if mm != nil {
