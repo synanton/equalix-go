@@ -27,6 +27,7 @@ This is **not a language port**. The Java code is the behavioral reference; the 
 | Postgres adapter | ✅ | ✅ (testcontainers) | ⬜ | ⬜ | ✅ warm-class (same runs) |
 | HTTP surface | ✅ | ✅ (contract tests) | ⬜ | ⬜ | ✅ warm-class (same runs) |
 | Jobs (dispatcher, calculator, watchdog, timeout) | ✅ | ✅ | ⬜ | ⬜ | ✅ warm-class (same runs) |
+| Redis CMS adapter | ✅ | ✅ (testcontainers + cross-instance) | ⬜ | ⬜ | ✅ cross-instance (fleet ±6, N=5; no-double-dispatch 5/5) |
 | Jobs (recovery) | — (no such service; CORRECTION-2) | — | — | — | — |
 
 `⬜` = not yet; nothing in this table is claimed before its evidence exists.
@@ -50,6 +51,7 @@ has. Starvation splits in two:
 | Quota bound | Java `maxPerClient` enforcement | ⬜ (fixtures green, no live run) |
 | Starvation — promotion deadline | Java `max-queued-time-ms` (60s) | 🔶 characterized, not gated (cold asymmetry Go ~780 / Java ~1000; warm 0/0 both sides) |
 | Starvation — K=3 window gate | **none** (harness-original, CORRECTION-3) | — by construction; validated by fixture + spec, never by differential |
+| Cross-instance shares (fleet aggregate) | same workload, two racers, shared PG + Redis | ✅ fleet ±6 (N=5 control-derived; single-instance ±2 does not transfer — post-commit CMS window at two-tick interleave) |
 
 ---
 
@@ -69,9 +71,8 @@ It targets asynchronous inference workloads where many tenants share LLM/GPU cap
 - Per-key hard quotas, anti-starvation aging plus `max-queued-time-ms` promotion
 - **Sequential execution mode** with per-key ordering, block recovery, and result passthrough
 
-### Planned (EQLX-8 next, then EQLX-9)
+### Planned (EQLX-9 next)
 
-- **Redis-backed CMS** — shared cross-instance sketch (EQLX-8); local sketch until then (per-instance in-flight views — no shared-fairness claim yet)
 - **Hierarchical fairness path** — validated independently in EQLX-9; flat path unaffected
 
 ### Task Lifecycle
@@ -108,7 +109,7 @@ Measured fairness in Java, with tenants at weights 1 : 2 : 7 continuously backlo
 - **Single static binary** — millisecond startup, tiny container images, no JVM
 - **Memory efficiency** — typically 4–6× lower RSS than equivalent JVM services in containers
 - **Concurrency model** — goroutines and channels map naturally to the dispatcher, watchdog, RPS controller, and priority calculator jobs
-- **Idiomatic dependency stack** — `pgx`, `chi`, `prometheus/client_golang` (`go-redis` declared; Redis-backed CMS lands in EQLX-8)
+- **Idiomatic dependency stack** — `pgx`, `chi`, `prometheus/client_golang`, `go-redis`
 
 ---
 
