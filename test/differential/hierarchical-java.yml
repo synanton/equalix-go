@@ -1,0 +1,19 @@
+# Hierarchical config for the Java oracle in differential runs.
+# Loaded via SPRING_CONFIG_ADDITIONALLOCATION (additive — base config
+# untouched). Mirrors test/differential/hierarchical-go.yaml; the two
+# files must agree (separator, layers, weights) or the pair compares
+# different trees.
+app:
+  queue:
+    fairness-mode: hierarchical
+  hierarchical:
+    separator: /
+    layers:
+      - name: organization
+        default-weight: 1.0
+      - name: department
+        default-weight: 1.0
+    weights:
+      p1: 1.0
+      p2: 2.0
+    metrics-depth: 1
