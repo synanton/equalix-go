@@ -21,7 +21,12 @@ dependency; rejected as an operator opt-in at most, never the
 default. Fail-open is the default; fail-closed is not implemented
 in this phase (no `redis.fallback_policy` knob — one policy, no
 configuration surface for a choice operators should not have to
-make under pressure).
+make under pressure). Fail-open is the only policy, full stop — not
+"for v1". Fail-closed would require a spec change and a new config
+surface; not currently planned (and not a v2 candidate on record —
+a compliance deployment needing a hard Redis dependency re-opens
+the question with its own scope, it does not flip a knob that does
+not exist).
 
 ### 2. Watchdog cross-instance coordination: advisory lock
 
@@ -29,7 +34,10 @@ With a shared CMS, two watchdogs rebuilding concurrently race (one
 rebuilds, the other overwrites mid-rebuild). Decision: the existing
 Postgres advisory-lock pattern serializes rebuilds (same lock family
 as migrate-on-startup; bounded by statement_timeout, documented per
-the migrate review). Last-writer-wins rejected: silent double-write
+the migrate review) — on a DIFFERENT well-known key from the
+migration lock (mandated, not suggested: a shared key would serialize
+5-minute watchdog ticks behind deploy-time DDL). Last-writer-wins
+rejected: silent double-write
 with no serialization is the namespace-collision class wearing a
 different hat.
 
@@ -51,9 +59,16 @@ trips would multiply Redis RTT by batch size. Decision: extend
 `port.CMSStore` with `AddBatch(map[string]int64) error` + spec NOTE
 (same pattern as the EQLX-6 Metrics extension — port change with
 recorded rationale, not scope creep). Redis adapter pipelines
-EVALSHA per key (atomicity is per-key — each script execution is
-atomic; batching saves round trips, not cross-key atomicity, and
-the scope does not claim more). Local sketch implements AddBatch
+EVALSHA per key: fire-and-forget, NO MULTI — a dropped connection
+mid-batch leaves partial writes, stated plainly. Acceptable because
+the failure mode is bounded and self-healing: missed increments
+undercount until the next watchdog rebuild corrects them (same
+window as the crash-between-commit-and-flush §8 drift the system
+already tolerates), and per-key script execution stays atomic.
+MULTI/EXEC rejected (holds the connection through the batch for an
+atomicity the CMS does not need); single-script whole-batch EVAL
+rejected (couples batch size to script complexity for no semantic
+gain). Local sketch implements AddBatch
 as a loop (zero cost, keeps the port uniform). Test fakes updated.
 
 ### 5. Key naming: namespaced, no TTL
@@ -62,7 +77,15 @@ Keys `equalix:cms:v1:{tenant}` (version segment for future format
 changes). No TTL: eviction is watchdog-driven (SCAN namespace +
 DEL keys absent from DB actuals on rebuild), not time-driven —
 a TTL would silently drop slow tenants' counts mid-backlog, which
-is the silent class with a timer on it. Memory bound: tenant cap
+is the silent class with a timer on it. No code mitigation for
+watchdog outage accumulation either: if the watchdog flatlines,
+Redis grows (one small hash entry per tenant — bounded by tenant
+cardinality, not unbounded) until the watchdog returns and the
+rebuild clears it; the runbook documents the flatline signature.
+Redis-side maxmemory eviction explicitly NOT recommended as the
+fix: evicting sketch keys silently corrupts counts downward
+(under-counts that read as idle tenants), which is worse than
+growth — growth is visible, corruption is not. Memory bound: tenant cap
 policy from EQLX-6 applies to series, not sketch keys; sketch
 memory is width×depth fixed (~2.6 MB) regardless of key count.
 

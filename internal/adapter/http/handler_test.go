@@ -206,6 +206,8 @@ func (f *fakeCMS) Total(_ context.Context) (int64, error) {
 	return t, nil
 }
 
+func (f *fakeCMS) AddBatch(_ context.Context, _ map[string]int64) error { return nil }
+
 func (f *fakeCMS) Rebuild(_ context.Context, _ map[string]int64) error { return nil }
 
 type completion struct {
@@ -239,6 +241,7 @@ func (f *fakeMetrics) ObserveCMSWarmup(_ float64)              {}
 func (f *fakeMetrics) SetRPS(r float64)                        { f.rps = r }
 func (f *fakeMetrics) PublishDrift(_ map[string]int64)         {}
 func (f *fakeMetrics) SetQueueDepth(_ int)                     {}
+func (f *fakeMetrics) SetCMSDegraded(_ bool)                   {}
 
 type fakeRPS struct{ rps float64 }
 

@@ -41,6 +41,15 @@ func (m *memCMS) Total(_ context.Context) (int64, error) {
 	return m.s.Total(), nil
 }
 
+func (m *memCMS) AddBatch(ctx context.Context, deltas map[string]int64) error {
+	for k, d := range deltas {
+		if err := m.Add(ctx, k, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m *memCMS) Rebuild(_ context.Context, c map[string]int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -73,6 +82,7 @@ func (m *memMetrics) ObserveCMSWarmup(float64)              {}
 func (m *memMetrics) SetRPS(float64)                        {}
 func (m *memMetrics) PublishDrift(map[string]int64)         {}
 func (m *memMetrics) SetQueueDepth(int)                     {}
+func (m *memMetrics) SetCMSDegraded(bool)                    {}
 
 func (m *memMetrics) completed() int {
 	m.mu.Lock()

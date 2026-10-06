@@ -14,6 +14,12 @@ type CMSStore interface {
 	EstimateCount(ctx context.Context, key string) (int64, error)
 	// Total returns the global in-flight estimate.
 	Total(ctx context.Context) (int64, error)
+	// AddBatch applies deltas for many keys (EQLX-8: buffering decorator
+	// flushes N keys at commit — per-key round trips would multiply
+	// remote RTT by batch size; pipelined server-side, atomic per key,
+	// not across the batch — see scope). Local implementations loop Add
+	// at zero marginal cost; callers must not assume cross-key atomicity.
+	AddBatch(ctx context.Context, deltas map[string]int64) error
 	// Rebuild replaces all state from a watchdog/warm-up snapshot
 	// (spec §§4.5, 8).
 	Rebuild(ctx context.Context, counts map[string]int64) error
@@ -70,6 +76,12 @@ type Metrics interface {
 	ObserveWatchdogReconciliation(seconds float64)
 	// ObserveCMSWarmup records the startup sketch-rebuild duration.
 	ObserveCMSWarmup(seconds float64)
+	// SetCMSDegraded reports Redis-CMS fallback state (EQLX-8): true
+	// while dispatch reads/writes run against the local sketch because
+	// Redis is unreachable. Edge-triggered by the caller (transition
+	// only) — gauges are idempotent, but the hot path must not pay a
+	// set on every operation.
+	SetCMSDegraded(degraded bool)
 	// SetRPS publishes the adaptive controller's current cap (gauge source).
 	SetRPS(rps float64)
 	// SetQueueDepth publishes the RECEIVED backlog size

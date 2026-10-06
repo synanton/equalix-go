@@ -41,6 +41,7 @@ const (
 	RPSCurrent                     = "equalix_rps_current"
 	ReceivedQueueDepth             = "equalix_received_queue_depth"
 	CMSDriftEstimate               = "equalix_cms_drift_estimate"
+	CMSRedisDegraded               = "equalix_cms_redis_degraded"
 	CardinalityExceeded            = "equalix_metrics_cardinality_exceeded_total"
 )
 
@@ -93,6 +94,7 @@ type Adapter struct {
 	rps              prometheus.Gauge
 	queueDepth       prometheus.Gauge
 	drift            *prometheus.GaugeVec
+	redisDegraded    prometheus.Gauge
 	exceeded         *prometheus.CounterVec
 
 	mu        sync.Mutex
@@ -138,6 +140,9 @@ func New(cfg Config) (*Adapter, error) {
 		drift: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: CMSDriftEstimate, Help: "Watchdog per-key CMS drift.",
 		}, []string{"tenant"}),
+		redisDegraded: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: CMSRedisDegraded, Help: "1 while dispatch runs against the local sketch because Redis is unreachable.",
+		}),
 		exceeded: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: CardinalityExceeded,
 			Help: "Samples dropped by the tenant cardinality cap, by metric.",
@@ -145,7 +150,7 @@ func New(cfg Config) (*Adapter, error) {
 	}
 	reg.MustRegister(a.dispatched, a.completed, a.dispatchLatency,
 		a.timeoutLatency, a.watchdogDuration, a.cmsWarmup,
-		a.rps, a.queueDepth, a.drift, a.exceeded)
+		a.rps, a.queueDepth, a.drift, a.redisDegraded, a.exceeded)
 	return a, nil
 }
 
@@ -217,6 +222,14 @@ func (a *Adapter) ObserveCMSWarmup(seconds float64) {
 func (a *Adapter) SetRPS(rps float64) { a.rps.Set(rps) }
 
 func (a *Adapter) SetQueueDepth(n int) { a.queueDepth.Set(float64(n)) }
+
+func (a *Adapter) SetCMSDegraded(degraded bool) {
+	if degraded {
+		a.redisDegraded.Set(1)
+		return
+	}
+	a.redisDegraded.Set(0)
+}
 
 func (a *Adapter) PublishDrift(drift map[string]int64) {
 	keys := make([]string, 0, len(drift))

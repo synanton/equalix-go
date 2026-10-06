@@ -108,10 +108,15 @@ func TestLoadFileConfig(t *testing.T) {
 }
 
 func TestMigrateKnobPrecedence(t *testing.T) {
-	// Default off everywhere: opt-in, never accidental.
+	// Default off everywhere: opt-in, never accidental. The full unit
+	// suite runs flag-off, which is the parity-preservation evidence
+	// (local CMS path unchanged); this asserts the default, not behavior.
 	got, err := resolveSettings(map[string]bool{}, settings{}, getenvOf(nil), fileConfig{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got.RedisEnabled || got.RedisURL != "" {
+		t.Fatalf("redis defaults wrong: %+v", got)
 	}
 	if got.MigrateOnStartup || got.MigrationsDir != "" {
 		t.Fatalf("migrate defaults wrong: %+v", got)

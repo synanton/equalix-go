@@ -26,6 +26,7 @@ func (d *driftRecorder) ObserveWatchdogReconciliation(float64)  {}
 func (d *driftRecorder) ObserveCMSWarmup(float64)               {}
 func (d *driftRecorder) SetRPS(float64)                         {}
 func (d *driftRecorder) SetQueueDepth(int)                      {}
+func (d *driftRecorder) SetCMSDegraded(bool)                     {}
 func (d *driftRecorder) PublishDrift(m map[string]int64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -268,6 +269,8 @@ func (g *gaugeMetrics) SetQueueDepth(n int) {
 	defer g.mu.Unlock()
 	g.depth = n
 }
+
+func (g *gaugeMetrics) SetCMSDegraded(bool) {}
 
 func (g *gaugeMetrics) value() int {
 	g.mu.Lock()
