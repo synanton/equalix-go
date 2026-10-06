@@ -371,3 +371,27 @@ func TestHierPerLevelClamp(t *testing.T) {
 	got := float64(dispatched["acme/returning"]) / 600.0
 	closeTo(t, "returning share", got, 1.0/3, 0.05)
 }
+
+// TestHierAsymmetricParents exercises the Q3 answer (independent
+// weights, never sum-of-children): parent A with 2 children vs
+// parent B with 5 children, all weights 1. Sum-of-children would give
+// B 5/7 of the run; independent weights give 1/2 each, split within
+// the parent (A: 1/4 each, B: 1/10 each). Equal-shape fixtures cannot
+// distinguish the rules — this shape can.
+func TestHierAsymmetricParents(t *testing.T) {
+	h := hierHierarchy(t, nil)
+	backlog := map[string]int{
+		"a/x": 1000000, "a/y": 1000000,
+		"b/1": 1000000, "b/2": 1000000, "b/3": 1000000, "b/4": 1000000, "b/5": 1000000,
+	}
+	dispatched := hierSimulate(t, h, backlog, 14000, 100, map[string]domain.HierarchyNodeState{})
+	aTotal := dispatched["a/x"] + dispatched["a/y"]
+	bTotal := 0
+	for _, k := range []string{"b/1", "b/2", "b/3", "b/4", "b/5"} {
+		bTotal += dispatched[k]
+	}
+	closeTo(t, "A subtree share", float64(aTotal)/14000.0, 0.5, 0.01)
+	closeTo(t, "B subtree share", float64(bTotal)/14000.0, 0.5, 0.01)
+	closeTo(t, "a/x share", float64(dispatched["a/x"])/14000.0, 0.25, 0.01)
+	closeTo(t, "b/1 share", float64(dispatched["b/1"])/14000.0, 0.1, 0.01)
+}
