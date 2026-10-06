@@ -26,7 +26,7 @@ func (d *driftRecorder) ObserveWatchdogReconciliation(float64)  {}
 func (d *driftRecorder) ObserveCMSWarmup(float64)               {}
 func (d *driftRecorder) SetRPS(float64)                         {}
 func (d *driftRecorder) SetQueueDepth(int)                      {}
-func (d *driftRecorder) SetCMSDegraded(bool)                     {}
+func (d *driftRecorder) SetCMSDegraded(bool)                    {}
 func (d *driftRecorder) PublishDrift(m map[string]int64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

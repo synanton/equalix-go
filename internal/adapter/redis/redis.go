@@ -23,6 +23,7 @@ package redis
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -177,11 +178,16 @@ func isNoScript(err error) bool {
 	return strings.Contains(msg, "NOSCRIPT") || strings.Contains(msg, "No matching script")
 }
 
-// degrade flips to local on first failure (edge-triggered: the gauge
-// set costs nothing, but the transition is what operators alert on).
-// Recovery flips back on the first success.
-func (a *Adapter) degrade() {
+// degrade flips to local on first failure (edge-triggered: one log
+// line per transition with the cause — an unreachable Redis and a
+// warm-up timeout both read "degraded" on the gauge, but the operator
+// needs to tell "Redis is down, check Redis" from "seed timed out,
+// check client_counts size and lock status". The gauge stays binary
+// (cause lives in logs, not labels — a per-cause series doubles
+// cardinality for a diagnostic dimension).
+func (a *Adapter) degrade(err error) {
 	if a.degraded.CompareAndSwap(false, true) {
+		slog.Warn("cms redis degraded, using local mirror", "err", err)
 		a.metrics.SetCMSDegraded(true)
 	}
 }
@@ -199,7 +205,7 @@ func (a *Adapter) Add(ctx context.Context, key string, delta int64) error {
 	for row := 0; row < a.depth; row++ {
 		if _, err := a.runScript(ctx, "add",
 			[]string{tenantKey(key), totalKey, knownSet}, row, delta); err != nil {
-			a.degrade()
+			a.degrade(fmt.Errorf("add %s: %w", key, err))
 			a.mu.Lock()
 			a.local.Add(key, delta)
 			a.mu.Unlock()
@@ -217,6 +223,14 @@ func (a *Adapter) Add(ctx context.Context, key string, delta int64) error {
 // fire-and-forget per key, NO MULTI — a dropped connection mid-batch
 // leaves partial writes, bounded and self-healing via the next
 // watchdog rebuild, same window class as the §8 crash drift).
+// NOSCRIPT mid-batch is NOT resent: commands before the miss applied,
+// the miss failed, the rest never executed — resending the whole batch
+// would double-count the head. The batch degrades as a unit (mirror
+// absorbed everything up front), scripts reload best-effort for the
+// next call. Single-key Add, by contrast, reloads and retries once —
+// resending one idempotent increment is safe, resending a partial
+// batch is not. The two paths deliberately differ; do not "unify"
+// them without re-deriving this paragraph.
 // Callers must not assume cross-key atomicity.
 func (a *Adapter) AddBatch(ctx context.Context, deltas map[string]int64) error {
 	if len(deltas) == 0 {
@@ -246,7 +260,7 @@ func (a *Adapter) AddBatch(ctx context.Context, deltas map[string]int64) error {
 		if isNoScript(err) {
 			a.reloadScripts(ctx)
 		}
-		a.degrade()
+		a.degrade(fmt.Errorf("addBatch: %w", err))
 		return nil // fail-open: mirror already absorbed the batch
 	}
 	a.recover()
@@ -278,7 +292,7 @@ func toInt64(v interface{}) int64 {
 func (a *Adapter) EstimateCount(ctx context.Context, key string) (int64, error) {
 	res, err := a.runScript(ctx, "estimate", []string{tenantKey(key)})
 	if err != nil {
-		a.degrade()
+		a.degrade(fmt.Errorf("estimate %s: %w", key, err))
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		return a.local.EstimateCount(key), nil
@@ -290,7 +304,7 @@ func (a *Adapter) EstimateCount(ctx context.Context, key string) (int64, error) 
 func (a *Adapter) Total(ctx context.Context) (int64, error) {
 	n, err := a.client.Get(ctx, totalKey).Int64()
 	if err != nil {
-		a.degrade()
+		a.degrade(fmt.Errorf("total: %w", err))
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		return a.local.Total(), nil
