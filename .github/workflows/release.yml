@@ -9,14 +9,12 @@
 name: release
 
 on:
-  # push trigger ARMED ONLY after the dry-run rehearsal greens (see
-  # below): an untested workflow with contents:write + packages:write
-  # firing on a stray v* tag is the failure the rehearsal exists to
-  # prevent. Uncomment to arm, in the release PR, after dispatch
-  # dry_run passes on main.
-  # push:
-  #   tags:
-  #     - "v*"
+  # Armed after the dry-run rehearsal greened on main (run 37453111911:
+  # version, notes, build, login verified; deliberate short-circuit).
+  # The rehearsal existing is what makes this trigger safe to arm.
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       dry_run:
