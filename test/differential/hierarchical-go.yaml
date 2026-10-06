@@ -1,0 +1,17 @@
+# Hierarchical config for equalix-go in differential runs (--config).
+# Mirrors test/differential/hierarchical-java.yml; the two files must
+# agree (separator, layers, weights) or the pair compares different
+# trees. Only the fairness subtree is read here — DSN/ports/keys stay
+# on flags and env as usual.
+fairness-mode: hierarchical
+hierarchical:
+  separator: /
+  layers:
+    - name: organization
+      default-weight: 1.0
+    - name: department
+      default-weight: 1.0
+  weights:
+    p1: 1.0
+    p2: 2.0
+  metrics-depth: 1
