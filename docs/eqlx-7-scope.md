@@ -11,33 +11,40 @@ pending and no home phase to put them in).
 
 ### Residuals (characterization, none gate anything)
 
-1. **Promotion-deadline row.** Warm-class runs show 0 promotions, cold
-   runs avalanche — neither exercises the deadline deliberately. New
-   workload: fixed-rate ingest tuned so p90 queue wait crosses
-   `maxQueuedTime` (60s) while the lanes keep draining (exact rate
-   determined empirically in the run PR; start near the observed
-   crossover and adjust once). Units, pinned: the file parameterizes
-   TOTAL rate across tenants (CORRECTION-3's ≈7/s is per-tenant — for
-   3 tenants the crossover file uses ≈21 total; the header states both
-   numbers so the tuning run cannot misread the target). Class: warm
-   (the deadline exercise needs operating RPS; a cold burst confounds
-   ramp with deadline). Verdict: promotion counts recorded per side, shares gated as usual. Closes the maturity table's
-   starvation-promotion row as *characterized*. If the first tuning run
-   avalanches or starves, record the shape and retune — the row wants
-   one deliberate deadline exercise, not a specific outcome. Sweep,
-   not a single run: the crossover band (the rate range where the
-   deadline mechanism and the steady-state gate become
-   indistinguishable) cannot be produced from one tuned point — run at
-   least three rates (below / at / above the expected crossover), one
-   parameterized workload file with three invocations, not three
-   files. The band is empirical (K-dominant above, deadline-dominant
+1. **Promotion-deadline row: COLD class 3-point sweep.** Warm-class
+   pacing was tried first (JvG 21/s, warm-500-p8-rps15) and fails
+   identically on both sides with byte-identical steady orders —
+   a gate/workload mismatch, not implementation divergence, and the
+   reason is structural: a warmed controller sits at ceiling RPS, so
+   dispatch capacity (≥100/s) dwarfs any sane ingest rate, no backlog
+   ever forms, and there is nothing for the 60s deadline to bite.
+   Arithmetic proof from the run log: both 1000-windows deviate
+   exactly {100,200,300} on both sides with exact 200/400/1400 totals
+   and identical steady orders, which constrains each window to either
+   all-c or {200,400,400} — extreme c front/back-loading, in lockstep.
+   Uncontended flow degenerates to tag order on both sides; fairness
+   shaping requires contention. The deadline only fires when ingest
+   persistently exceeds dispatch capacity during the ramp — i.e. the
+   cold class, where RPS starts at 1. Sweep cold at three total rates
+   (below/at/above the ≈21/s crossover for 3 tenants at CORRECTION-3's
+   ≈7/s per-tenant; one parameterized file, three paced invocations):
+   the band edge is where the ramp-vs-deadline race starts biting,
+   and the existing cold JvG intermittency (2/5 avalanche on burst)
+   is that band manifesting at burst rate. Empirical edges
+   (K-dominant above, deadline-dominant below), never inferred.
+   Verdict per point: promotion counts recorded per side, shares gated
+   as usual; the band is the three verdicts together, not any one run.
+   Closes the maturity table's starvation-promotion row as
+   *characterized*. If a tuning point avalanches or starves, record
+   the shape — the row wants the band mapped, not a specific outcome.
    below, with the observed edges), never inferred from the mechanism
    alone — the CORRECTION-3 NOTE already contains the derivation, and
    re-deriving it would duplicate rather than evidence. Output:
    `docs/evidence/eqlx-7-promotion-deadline.md` in the EQLX-5 evidence
-   shape: tuned rate, per-side promoted counts, share deviation at
-   that rate, and the crossover band (the rate range where the two
-   mechanisms are indistinguishable).
+   shape: the three paced rates, per-side promoted counts and share
+   verdicts per point, the empirical band edges, plus the warm-paced
+   negative result (why warm pacing cannot work — contention
+   requirement) so nobody re-tries it.
 2. **Idle-tenant credit: parity check, not just characterization.** A
    tenant idle for the first half, active for the second — run as a
    JvG + GvG warm-class pair, in BOTH floor regimes: above floor
