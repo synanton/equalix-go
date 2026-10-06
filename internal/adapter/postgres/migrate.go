@@ -52,6 +52,29 @@ const migrateStatementTimeout = "300s"
 // retry-budget machinery with identical worst-case behavior.
 const migrateLockTimeout = "30s"
 
+// EnsureSchema applies the embedded set iff the tasks table is absent
+// (fresh database from the compose pg-init path), else no-ops. Go-side
+// ONLY: Java's schema belongs to Flyway — goose-migrating it would fork
+// the schema source and fight Flyway validation on the next boot.
+// Called after boot, before ResetDB: residue clearing assumes tables,
+// schema creation precedes it.
+func EnsureSchema(ctx context.Context, dsn string) error {
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("postgres: schema check connect: %w", err)
+	}
+	defer conn.Close(ctx)
+	var exists bool
+	if err := conn.QueryRow(ctx,
+		`SELECT to_regclass('public.tasks') IS NOT NULL`).Scan(&exists); err != nil {
+		return fmt.Errorf("postgres: schema check: %w", err)
+	}
+	if exists {
+		return nil
+	}
+	return Migrate(ctx, dsn, "")
+}
+
 // Migrate applies pending migrations (embedded FS, or dir when set)
 // under the advisory lock, then releases it. Fail-fast: any error
 // returns before the caller binds any listener — no partial startup.

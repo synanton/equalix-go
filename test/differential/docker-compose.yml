@@ -11,6 +11,11 @@ services:
       POSTGRES_PASSWORD: x
       POSTGRES_DB: equalix
       PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      # Declarative bootstrap: role + empty databases on first start.
+      # Schema is NOT here (see pg-init file header for why) — Java
+      # Flyway and the harness ensureSchema own their sides' DDL.
+      - ./pg-init:/docker-entrypoint-initdb.d:ro
     ports:
       - "5433:5432"
     healthcheck:
@@ -19,10 +24,13 @@ services:
       timeout: 2s
       retries: 30
 
-  # Databases are created (not assumed) by the harness setup step:
-  #   CREATE USER cmp WITH PASSWORD 'x' SUPERUSER;
-  #   CREATE DATABASE equalix_java OWNER cmp;
-  #   CREATE DATABASE equalix_go OWNER cmp;
+  # Databases exist (not assumed) from the pg-init mount above: cmp
+  # role plus empty equalix_java/go/go2. Schema is applied by owners,
+  # never by hand: Java Flyway on boot; the harness ensureSchema
+  # (embedded goose set) for Go databases at test startup when tables
+  # are absent, ResetDB between runs for residue. A live database that
+  # did not come from this file + those two paths is ad-hoc state —
+  # see spec §13 NOTE on harness reproducibility.
   # Go migrations apply from migrations/*.sql; Java Flyway migrates on boot.
   # DSNs for a default local run:
   #   Java JDBC: jdbc:postgresql://localhost:5433/equalix_java
