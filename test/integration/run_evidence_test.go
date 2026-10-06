@@ -82,7 +82,7 @@ func (m *memMetrics) ObserveCMSWarmup(float64)              {}
 func (m *memMetrics) SetRPS(float64)                        {}
 func (m *memMetrics) PublishDrift(map[string]int64)         {}
 func (m *memMetrics) SetQueueDepth(int)                     {}
-func (m *memMetrics) SetCMSDegraded(bool)                    {}
+func (m *memMetrics) SetCMSDegraded(bool)                   {}
 
 func (m *memMetrics) completed() int {
 	m.mu.Lock()
