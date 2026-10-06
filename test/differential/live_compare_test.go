@@ -4,6 +4,7 @@ package differential
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -286,7 +287,12 @@ func TestLiveJavaVsGo(t *testing.T) {
 		JavaPort: 18083, GoPort: 18084, Stub: DefaultLatency(),
 		MarkerJava: java.Marker, MarkerGo: goRes.Marker,
 	}
-	method := "EQLX-5 real01 [" + warmCfg.Class() + "]: w2000 (200/400/1400, 1:2:7) fixed-100ms stub, as-fast-as-possible"
+	pace := SubmitPacePerSec()
+	paceStr := "burst"
+	if pace > 0 {
+		paceStr = fmt.Sprintf("paced-%.0f/s", pace)
+	}
+	method := "EQLX-5 real01 [" + warmCfg.Class() + "]: " + wl + " (200/400/1400, 1:2:7) fixed-100ms stub, " + paceStr
 	traces := tracer.Stop()
 	fetch := tracer.FetchStats()
 	for side, pts := range traces {
@@ -467,7 +473,12 @@ func TestLiveGoVsGo(t *testing.T) {
 		JavaPort: 18085, GoPort: 18086, Stub: DefaultLatency(),
 		MarkerJava: g1.Marker, MarkerGo: g2.Marker,
 	}
-	method := "EQLX-5 control [" + warmCfg.Class() + "]: go-vs-go (go1 in java_* slots) " + wl + " fixed-100ms stub, as-fast-as-possible"
+	method := "EQLX-5 control [" + warmCfg.Class() + "]: go-vs-go (go1 in java_* slots) " + wl + " fixed-100ms stub, " + func() string {
+		if p := SubmitPacePerSec(); p > 0 {
+			return fmt.Sprintf("paced-%.0f/s", p)
+		}
+		return "burst"
+	}()
 	traces := tracer.Stop()
 	fetch := tracer.FetchStats()
 	for side, pts := range traces {
