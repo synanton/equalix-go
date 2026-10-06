@@ -12,6 +12,12 @@ type TxPorts struct {
 	Tasks       TaskRepository
 	Counts      CountsRepository
 	VirtualTime VirtualTimeRepository
+	// Leaves + HStates ride the transaction for hierarchical dispatch
+	// (EQLX-9): lock-heads + status moves + counts commit together,
+	// same atomicity as the flat path. Nil outside hierarchical ticks
+	// (fakes leave them unset); callers must not retain past callback.
+	Leaves  LeafStore
+	HStates HierarchyStateStore
 }
 
 // Transactor runs fn with repositories bound to a single transaction.

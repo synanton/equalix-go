@@ -35,6 +35,7 @@ type Stores struct {
 	Counts      *CountsStore
 	Sequences   *SequenceStore
 	VirtualTime *VirtualTimeStore
+	Hierarchy   *HierarchyStores
 }
 
 // NewStores returns pool-bound repositories over pool.
@@ -50,6 +51,7 @@ func bind(pool *pgxpool.Pool, q querier) *Stores {
 		Counts:      &CountsStore{q: q},
 		Sequences:   &SequenceStore{q: q},
 		VirtualTime: &VirtualTimeStore{q: q},
+		Hierarchy:   &HierarchyStores{q: q},
 	}
 }
 
@@ -67,6 +69,8 @@ func (s *Stores) Transact(ctx context.Context, fn func(port.TxPorts) error) erro
 		Tasks:       bound.Tasks,
 		Counts:      bound.Counts,
 		VirtualTime: bound.VirtualTime,
+		Leaves:      bound.Hierarchy,
+		HStates:     bound.Hierarchy,
 	}); err != nil {
 		return err
 	}

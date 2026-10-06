@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	executor "github.com/synanton/equalix-go/internal/adapter/executor"
+	hieradapter "github.com/synanton/equalix-go/internal/adapter/hierarchical"
 	chiadapter "github.com/synanton/equalix-go/internal/adapter/http"
 	promadapter "github.com/synanton/equalix-go/internal/adapter/metrics"
 	pgadapter "github.com/synanton/equalix-go/internal/adapter/postgres"
@@ -139,19 +140,36 @@ func toInt64(m map[string]int) map[string]int64 {
 // flags/env, pointers so absent keys are distinguishable from zero
 // values (a zero tenant cap must never sneak in as "unset").
 type fileConfig struct {
-	DSN              *string `yaml:"dsn"`
-	Addr             *string `yaml:"addr"`
-	APIKey           *string `yaml:"api-key"`
-	MaxPayloadBytes  *int    `yaml:"max-payload-bytes"`
-	ExecutorBaseURL  *string `yaml:"executor-base-url"`
-	MetricsPath      *string `yaml:"metrics-path"`
-	MetricsTenantCap *int    `yaml:"metrics-tenant-cap"`
-	MetricsDriftKeys *int    `yaml:"metrics-drift-max-keys"`
-	MigrateOnStartup *bool   `yaml:"migrate-on-startup"`
-	MigrationsDir    *string `yaml:"migrations-dir"`
-	RedisEnabled     *bool   `yaml:"redis-enabled"`
-	RedisURL         *string `yaml:"redis-url"`
-	RedisTimeoutSecs *int    `yaml:"redis-timeout-secs"`
+	DSN              *string         `yaml:"dsn"`
+	Addr             *string         `yaml:"addr"`
+	APIKey           *string         `yaml:"api-key"`
+	MaxPayloadBytes  *int            `yaml:"max-payload-bytes"`
+	ExecutorBaseURL  *string         `yaml:"executor-base-url"`
+	MetricsPath      *string         `yaml:"metrics-path"`
+	MetricsTenantCap *int            `yaml:"metrics-tenant-cap"`
+	MetricsDriftKeys *int            `yaml:"metrics-drift-max-keys"`
+	MigrateOnStartup *bool           `yaml:"migrate-on-startup"`
+	MigrationsDir    *string         `yaml:"migrations-dir"`
+	RedisEnabled     *bool           `yaml:"redis-enabled"`
+	RedisURL         *string         `yaml:"redis-url"`
+	RedisTimeoutSecs *int            `yaml:"redis-timeout-secs"`
+	FairnessMode     *string         `yaml:"fairness-mode"`
+	Hierarchical     *hierFileConfig `yaml:"hierarchical"`
+}
+
+// hierFileConfig mirrors domain.HierarchyConfig for the YAML file
+// (layers/weights are structured — flags carry only the mode switch;
+// file carries the tree).
+type hierFileConfig struct {
+	Separator    *string            `yaml:"separator"`
+	Layers       []hierLayerConfig  `yaml:"layers"`
+	Weights      map[string]float64 `yaml:"weights"`
+	MetricsDepth *int               `yaml:"metrics-depth"`
+}
+
+type hierLayerConfig struct {
+	Name          string  `yaml:"name"`
+	DefaultWeight float64 `yaml:"default-weight"`
 }
 
 // settings is the resolved runtime configuration. TimeoutSecs fields
@@ -169,6 +187,8 @@ type settings struct {
 	RedisURL             string
 	RedisTimeoutSecs     int
 	RedisTimeout         time.Duration
+	FairnessMode         string
+	Hierarchy            domain.HierarchyConfig
 }
 
 func loadFileConfig(path string, explicit bool) (fileConfig, error) {
@@ -279,6 +299,28 @@ func resolveSettings(set map[string]bool, fl settings, getenv func(string) strin
 		return out, err
 	}
 	out.RedisTimeout = time.Duration(redisTimeoutSecs) * time.Second
+	// Fairness mode: flag/env only (no file default — the mode switch
+	// stays visible at the invocation layer). Hierarchical subtree
+	// comes from the file when present; enabled without layers fails
+	// in Validate (Java parity: layers must not be empty).
+	out.FairnessMode = str("fairness-mode", fl.FairnessMode, "EQUALIX_FAIRNESS_MODE", strVal(fc.FairnessMode), "flat")
+	if out.FairnessMode != "flat" && out.FairnessMode != "hierarchical" {
+		return out, fmt.Errorf("fairness-mode must be flat|hierarchical, got %q", out.FairnessMode)
+	}
+	out.Hierarchy.Enabled = out.FairnessMode == "hierarchical"
+	if fc.Hierarchical != nil {
+		hc := fc.Hierarchical
+		out.Hierarchy.Separator = strVal(hc.Separator)
+		for _, l := range hc.Layers {
+			out.Hierarchy.Layers = append(out.Hierarchy.Layers, domain.HierarchyLayer{
+				Name: l.Name, DefaultWeight: l.DefaultWeight,
+			})
+		}
+		out.Hierarchy.Weights = hc.Weights
+		if hc.MetricsDepth != nil {
+			out.Hierarchy.MetricsDepth = *hc.MetricsDepth
+		}
+	}
 	return out, nil
 }
 
@@ -394,6 +436,7 @@ func run() error {
 		redisEnabled     = flag.Bool("redis-enabled", false, "use shared Redis CMS instead of the local sketch (or EQUALIX_REDIS_ENABLED=true); default false — local behavior byte-identical")
 		redisURL         = flag.String("redis-url", "", "Redis host:port (or EQUALIX_REDIS_URL); required when redis-enabled")
 		redisTimeoutSecs = flag.Int("redis-timeout-secs", 0, "Redis dial/read/write timeout in seconds (default 5)")
+		fairnessMode     = flag.String("fairness-mode", "", "flat|hierarchical (or EQUALIX_FAIRNESS_MODE); default flat — hierarchical subtree comes from the config file")
 		configPath       = flag.String("config", "/etc/equalix/config.yaml", "YAML config file (loaded when present; missing explicit path is fatal, missing default is ignored)")
 	)
 	flag.Parse()
@@ -413,13 +456,15 @@ func run() error {
 			ExecBase: *execBase, MetricsPath: *metricsPath,
 			TenantCap: *tenantCap, DriftKeys: *driftKeys,
 			MigrateOnStartup: *migrateOnStartup, MigrationsDir: *migrationsDir,
-			RedisEnabled: *redisEnabled, RedisURL: *redisURL, RedisTimeoutSecs: *redisTimeoutSecs},
+			RedisEnabled: *redisEnabled, RedisURL: *redisURL, RedisTimeoutSecs: *redisTimeoutSecs,
+			FairnessMode: *fairnessMode},
 		os.Getenv, fc)
 	if err != nil {
 		return err
 	}
 
 	cfg := jobs.DefaultConfig()
+	cfg.Hierarchy = s.Hierarchy
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
 	}
@@ -483,6 +528,18 @@ func run() error {
 		}
 		defer radapter.Close()
 		cmsketch = radapter
+	}
+	// Hierarchy wiring (EQLX-9, mirror discipline): hierarchy.enabled
+	// selects a SEPARATE dispatch path (planner + decorated CMS); the
+	// flat path above is untouched. hier is nil unless enabled — the
+	// dispatcher branches on cfg.Hierarchy.Enabled, never on nilness.
+	var hier *domain.FairnessHierarchy
+	if s.Hierarchy.Enabled {
+		hier, err = domain.NewFairnessHierarchy(s.Hierarchy)
+		if err != nil {
+			return fmt.Errorf("hierarchy: %w", err)
+		}
+		cmsketch = hieradapter.New(cmsketch, hier)
 	}
 	// Throttle owns its own send pool as the FailedSends source
 	// (DECISION-5 wiring: pool → controller, no wrapper).
@@ -602,7 +659,9 @@ func run() error {
 			CMS:      cmsketch,
 			Executor: executor.NewHTTPExecutor(s.ExecBase, 5*time.Second),
 			Metrics:  metrics, Pool: sendpool, Throttle: controller,
-			Config: cfg,
+			Config:  cfg,
+			Leaves:  stores.Hierarchy,
+			HStates: stores.Hierarchy,
 		}))
 	} else {
 		slog.Warn("no executor configured; dispatcher unwired (ingest + tagging only)")

@@ -7,6 +7,8 @@ package jobs
 import (
 	"fmt"
 	"time"
+
+	"github.com/synanton/equalix-go/internal/domain"
 )
 
 // Config carries every jobs knob. Defaults mirror the Java reference
@@ -39,6 +41,10 @@ type Config struct {
 	// PenaltyFactor is the fixed in-flight pressure until EQLX-4 wires the
 	// live controller (NEW, default 1000.0 = 1000/initial-rps Java parity).
 	PenaltyFactor float64
+	// Hierarchy configures hierarchical fairness (EQLX-9, Java
+	// app.hierarchical). Disabled by default: the flat path it guards
+	// is byte-identical to the validated build.
+	Hierarchy domain.HierarchyConfig
 }
 
 // DefaultConfig returns Java defaults plus the new keys' defaults.
@@ -85,6 +91,9 @@ func (c Config) Validate() error {
 	}
 	if c.PenaltyFactor <= 0 {
 		return fmt.Errorf("jobs: penalty_factor must be positive")
+	}
+	if err := c.Hierarchy.Validate(); err != nil {
+		return err
 	}
 	// Drain budget, not interval multiple: grace must cover one in-flight
 	// tick plus send-pool drain on the hot loop. Batch caps

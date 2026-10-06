@@ -23,6 +23,8 @@ type Throttle interface {
 // to one connection (DECISION-3); CMS and Executor act post-commit; Metrics
 // records dispatches. Pool bounds async sends (claim-limited, scope §2).
 // Throttle nil preserves the fixed pre-EQLX-4 behavior (tests, early wiring).
+// Leaves/HStates wire the hierarchical path (EQLX-9, both nil unless
+// hierarchy is enabled — the flat tick never touches them, asserted).
 type DispatcherDeps struct {
 	Tx       port.Transactor
 	Tasks    port.TaskRepository
@@ -34,6 +36,8 @@ type DispatcherDeps struct {
 	Throttle Throttle
 	Config   Config
 	Log      *slog.Logger
+	Leaves   port.LeafStore
+	HStates  port.HierarchyStateStore
 }
 
 // Dispatcher selects QUEUED tasks and sends them, one Transact per tick.
@@ -48,6 +52,9 @@ func NewDispatcher(d DispatcherDeps) *Dispatcher {
 	}
 	if d.Metrics == nil {
 		d.Metrics = discardMetrics{}
+	}
+	if d.Config.Hierarchy.Enabled && (d.Leaves == nil || d.HStates == nil) {
+		panic("jobs: hierarchy enabled without Leaves/HStates stores")
 	}
 	return &Dispatcher{deps: d}
 }
@@ -111,6 +118,9 @@ func (d *Dispatcher) tick(ctx context.Context) error {
 	if free <= 0 {
 		return nil
 	}
+	if d.deps.Config.Hierarchy.Enabled {
+		return d.tickHierarchical(ctx, free)
+	}
 
 	var selected []*domain.Task
 	var selectElapsed time.Duration
@@ -154,6 +164,15 @@ func (d *Dispatcher) tick(ctx context.Context) error {
 	// task DISPATCHED for the timeout sweep (Java parity — the sweep is a
 	// 3b job; until then the task waits, bounded by task_timeout config).
 	// Cross-reference: the timeout-sweep contract this relies on.
+	d.sendAll(ctx, selected)
+	return nil
+}
+
+// sendAll runs the shared post-commit path: CMS add (fanned out by the
+// hierarchical decorator when enabled, plain otherwise), metrics, async
+// send. Identical for flat and hierarchical selection — only the
+// selection differs, never the commit consequences.
+func (d *Dispatcher) sendAll(ctx context.Context, selected []*domain.Task) {
 	for _, t := range selected {
 		if err := d.deps.CMS.Add(ctx, t.FairnessKey, 1); err != nil {
 			d.deps.Log.Warn("cms add failed", "task", t.ID, "err", err)
@@ -176,7 +195,129 @@ func (d *Dispatcher) tick(ctx context.Context) error {
 			return d.markCommitted(ctx, t)
 		})
 	}
+}
+
+// tickHierarchical runs one dispatch cycle through the two-stage
+// planner (Java HierarchicalDispatchPlanner.select + recordDispatch,
+// EQX-7): leaves → node states → plan → lock heads in pick order →
+// persist node charges. Flat virtual-time tagging (calculator) and
+// the flat V clock are untouched — hierarchy adds node-level
+// scheduling on top, exactly like the oracle (which likewise leaves
+// flat client_virtual_time alone on this path).
+// Sequential dispatches bypass selection on both sides; Go has no
+// sequential dispatcher yet, so there is no recordSequentialDispatch
+// mirror — noted, not hidden.
+func (d *Dispatcher) tickHierarchical(ctx context.Context, free int) error {
+	cfg := d.deps.Config
+	hier, err := domain.NewFairnessHierarchy(cfg.Hierarchy)
+	if err != nil {
+		return err
+	}
+	qStart := time.Now()
+	leaves, err := d.deps.Leaves.FindQueuedLeaves(ctx)
+	if err != nil {
+		return err
+	}
+	nodeKeys := map[string]bool{domain.HierarchyRoot: true}
+	for _, leaf := range leaves {
+		for _, node := range hier.Path(leaf.FairnessKey) {
+			nodeKeys[node.Key] = true
+		}
+	}
+	keys := make([]string, 0, len(nodeKeys))
+	for k := range nodeKeys {
+		keys = append(keys, k)
+	}
+	states, err := d.deps.HStates.FindStates(ctx, keys)
+	if err != nil {
+		return err
+	}
+	counts, err := d.deps.Counts.All(ctx)
+	if err != nil {
+		return err
+	}
+	expanded := hier.WithAncestors(toInt64Map(counts))
+	penalty := cfg.PenaltyFactor
+	if d.deps.Throttle != nil {
+		penalty = d.deps.Throttle.PenaltyFactor()
+	}
+	maxPerClient := 0
+	if cfg.MaxPerClientQuota > 0 {
+		maxPerClient = cfg.MaxPerClientQuota
+	}
+	plan := domain.Plan(leaves, hier, states, func(key string) int64 {
+		return expanded[key]
+	}, penalty, domain.DefaultQuantum, free, maxPerClient)
+	d.deps.Metrics.ObserveDispatchLatency(time.Since(qStart).Seconds())
+
+	var selected []*domain.Task
+	err = d.deps.Tx.Transact(ctx, func(tx port.TxPorts) error {
+		// Order locked heads by pick order (Java inPickOrder): picks
+		// whose task lost a race are skipped, never forced. Lock +
+		// status moves + counts commit together — same atomicity as
+		// the flat path (charges persist post-commit like Java's
+		// separate recordDispatch call).
+		locked, err := tx.Leaves.FindAndLockQueuedHeads(ctx, plan.TasksPerLeaf)
+		if err != nil {
+			return err
+		}
+		byKey := map[string][]*domain.Task{}
+		for _, t := range locked {
+			byKey[t.FairnessKey] = append(byKey[t.FairnessKey], t)
+		}
+		for _, key := range plan.PickOrder {
+			queue := byKey[key]
+			if len(queue) == 0 {
+				continue
+			}
+			t := queue[0]
+			byKey[key] = queue[1:]
+			t.Status = domain.StatusDispatched
+			if err := tx.Tasks.Save(ctx, t); err != nil {
+				return err
+			}
+			if err := tx.Counts.Increment(ctx, t.FairnessKey); err != nil {
+				return err
+			}
+			selected = append(selected, t)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	// Persist node charges + floors (Java recordDispatch): same
+	// max-then-add arithmetic as the adapter upserts. Floors default
+	// to 0 for nodes the plan never saw (getOrDefault semantics).
+	var dispatched []domain.DispatchedTask
+	for _, t := range selected {
+		dispatched = append(dispatched, domain.DispatchedTask{
+			FairnessKey: t.FairnessKey, Weight: t.EffectiveWeight(),
+		})
+	}
+	for nodeKey, delta := range domain.Charges(dispatched, plan, hier, domain.DefaultQuantum) {
+		floor := plan.NodeFloors[nodeKey]
+		if err := d.deps.HStates.ChargeVirtualTime(ctx, nodeKey, floor, delta); err != nil {
+			return err
+		}
+	}
+	for nodeKey, floor := range plan.ChildrenFloors {
+		if err := d.deps.HStates.RaiseChildrenFloor(ctx, nodeKey, floor); err != nil {
+			return err
+		}
+	}
+	d.sendAll(ctx, selected)
 	return nil
+}
+
+// toInt64Map widens counts for the ancestor expansion (which works in
+// int64 like the CMS layer).
+func toInt64Map(m map[string]int) map[string]int64 {
+	out := make(map[string]int64, len(m))
+	for k, v := range m {
+		out[k] = int64(v)
+	}
+	return out
 }
 
 func (d *Dispatcher) globalInFlight(ctx context.Context) (int, error) {

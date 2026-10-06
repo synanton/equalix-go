@@ -65,6 +65,35 @@ func TestResolvePrecedence(t *testing.T) {
 	}
 }
 
+// TestFairnessModeResolution pins the EQLX-9 opt-in: flat default,
+// hierarchical subtree from file only, unknown values fail loud
+// (a typo'd mode must never silently run flat).
+func TestFairnessModeResolution(t *testing.T) {
+	got, err := resolveSettings(map[string]bool{}, settings{}, getenvOf(nil), fileConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FairnessMode != "flat" || got.Hierarchy.Enabled {
+		t.Fatalf("defaults wrong: %+v", got)
+	}
+	if _, err := resolveSettings(map[string]bool{},
+		settings{FairnessMode: "bushy"},
+		getenvOf(map[string]string{"EQUALIX_FAIRNESS_MODE": "bushy"}), fileConfig{}); err == nil {
+		t.Fatal("unknown fairness mode accepted")
+	}
+	layers := []hierLayerConfig{{Name: "org", DefaultWeight: 1.0}}
+	got, err = resolveSettings(map[string]bool{},
+		settings{FairnessMode: "hierarchical"},
+		getenvOf(map[string]string{"EQUALIX_FAIRNESS_MODE": "hierarchical"}),
+		fileConfig{Hierarchical: &hierFileConfig{Separator: strp("/"), Layers: layers}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Hierarchy.Enabled || got.Hierarchy.Separator != "/" || len(got.Hierarchy.Layers) != 1 {
+		t.Fatalf("hierarchical subtree not applied: %+v", got.Hierarchy)
+	}
+}
+
 func TestLoadFileConfig(t *testing.T) {
 	dir := t.TempDir()
 	// Missing default path is ignored (dev machines have no file).

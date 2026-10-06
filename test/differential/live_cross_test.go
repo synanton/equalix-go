@@ -206,6 +206,7 @@ func TestLiveCrossInstance(t *testing.T) {
 	// EQLX-5 precedent (bound from control agreement); the derivation,
 	// not the number, is what makes it honest. N=5 to date; re-derive
 	// if the fleet grows beyond two racers.
+	fleet := RunLog{Weights: weights, Order: order, Created: map[string]int64{}}
 	results, mm := CompareShares(fleet, 1000, 6)
 	for _, w := range results {
 		if w.Full {
