@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -251,10 +252,13 @@ type fakeTx struct {
 	tasks  *fakeTasks
 	counts *fakeCounts
 	vt     *fakeVT
+	leaves *fakeLeaves
+	hstate *fakeHStates
 }
 
 func (f *fakeTx) Transact(_ context.Context, fn func(port.TxPorts) error) error {
-	return fn(port.TxPorts{Tasks: f.tasks, Counts: f.counts, VirtualTime: f.vt})
+	return fn(port.TxPorts{Tasks: f.tasks, Counts: f.counts, VirtualTime: f.vt,
+		Leaves: f.leaves, HStates: f.hstate})
 }
 
 type fakeExecutor struct {
@@ -326,6 +330,176 @@ func testConfig() Config {
 	c.DispatcherInterval = 10 * time.Millisecond
 	c.CalculatorInterval = 10 * time.Millisecond
 	return c
+}
+
+// sortTasks orders candidates like the flat dispatcher SQL:
+// (priority, createdAt, id) — shared by the hierarchical head
+// locking fake so both paths sort identically.
+func sortTasks(tasks []*domain.Task) {
+	sort.SliceStable(tasks, func(i, j int) bool {
+		a, b := tasks[i], tasks[j]
+		if a.HasPriority != b.HasPriority {
+			return a.HasPriority
+		}
+		if a.Priority != b.Priority {
+			return a.Priority < b.Priority
+		}
+		if !a.CreatedAt.Equal(b.CreatedAt) {
+			return a.CreatedAt.Before(b.CreatedAt)
+		}
+		return a.ID < b.ID
+	})
+}
+
+// fakeLeaves + fakeHStates serve hierarchical ticks in tests (EQLX-9):
+// leaves aggregate the backing tasks, heads lock by the same order,
+// states persist charges in a map. Nil in the default rig (flat ticks
+// must never touch them — see the exploding fakes below).
+type fakeLeaves struct{ b *fakeBacking }
+
+func (f *fakeLeaves) FindQueuedLeaves(context.Context) ([]domain.QueuedLeaf, error) {
+	f.b.mu.Lock()
+	defer f.b.mu.Unlock()
+	byKey := map[string]*domain.QueuedLeaf{}
+	for _, t := range f.b.tasks {
+		if t.Status != domain.StatusQueued || t.Sequential {
+			continue
+		}
+		l := byKey[t.FairnessKey]
+		if l == nil {
+			l = &domain.QueuedLeaf{FairnessKey: t.FairnessKey, MaxWeight: t.Weight}
+			byKey[t.FairnessKey] = l
+		}
+		l.Queued++
+		if t.Priority == 0 && t.HasPriority {
+			l.Promoted++
+		}
+		if t.Weight > l.MaxWeight {
+			l.MaxWeight = t.Weight
+		}
+		l.InFlight = f.b.counts.Get(t.FairnessKey)
+	}
+	var out []domain.QueuedLeaf
+	for _, l := range byKey {
+		out = append(out, *l)
+	}
+	return out, nil
+}
+
+func (f *fakeLeaves) FindAndLockQueuedHeads(_ context.Context, perLeaf map[string]int) ([]*domain.Task, error) {
+	f.b.mu.Lock()
+	defer f.b.mu.Unlock()
+	var out []*domain.Task
+	keys := make([]string, 0, len(perLeaf))
+	for k := range perLeaf {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		var cands []*domain.Task
+		for _, t := range f.b.tasks {
+			if t.Status == domain.StatusQueued && !t.Sequential && t.FairnessKey == key {
+				cands = append(cands, t)
+			}
+		}
+		sortTasks(cands)
+		for i := 0; i < perLeaf[key] && i < len(cands); i++ {
+			out = append(out, cands[i])
+		}
+	}
+	return out, nil
+}
+
+type fakeHStates struct {
+	mu sync.Mutex
+	m  map[string]domain.HierarchyNodeState
+}
+
+func (f *fakeHStates) FindStates(_ context.Context, keys []string) (map[string]domain.HierarchyNodeState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string]domain.HierarchyNodeState{}
+	for _, k := range keys {
+		if st, ok := f.m[k]; ok {
+			out[k] = st
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeHStates) ChargeVirtualTime(_ context.Context, key string, floor, delta float64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	st := f.m[key]
+	if st.VirtualTime < floor {
+		st.VirtualTime = floor
+	}
+	st.VirtualTime += delta
+	st.Key = key
+	f.m[key] = st
+	return nil
+}
+
+func (f *fakeHStates) RaiseChildrenFloor(_ context.Context, key string, floor float64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	st := f.m[key]
+	if st.ChildrenVirtualTime < floor {
+		st.ChildrenVirtualTime = floor
+	}
+	st.Key = key
+	f.m[key] = st
+	return nil
+}
+
+// explodingHierarchy fails any test that touches hierarchy stores:
+// with hierarchy disabled the flat tick must never consult them.
+// This is the parity-preservation assertion (EQLX-5 evidence cites
+// the exact flat code path — touching hierarchy stores would fork it).
+type explodingLeaves struct{}
+
+func (explodingLeaves) FindQueuedLeaves(context.Context) ([]domain.QueuedLeaf, error) {
+	panic("flat tick consulted hierarchy leaves")
+}
+
+func (explodingLeaves) FindAndLockQueuedHeads(context.Context, map[string]int) ([]*domain.Task, error) {
+	panic("flat tick consulted hierarchy leaves")
+}
+
+type explodingHStates struct{}
+
+func (explodingHStates) FindStates(context.Context, []string) (map[string]domain.HierarchyNodeState, error) {
+	panic("flat tick consulted hierarchy states")
+}
+
+func (explodingHStates) ChargeVirtualTime(context.Context, string, float64, float64) error {
+	panic("flat tick consulted hierarchy states")
+}
+
+func (explodingHStates) RaiseChildrenFloor(context.Context, string, float64) error {
+	panic("flat tick consulted hierarchy states")
+}
+
+func TestDispatcherFlatNeverTouchesHierarchy(t *testing.T) {
+	r := newRig()
+	seedReceived(r, "a", 1, 4, 0)
+	calc := NewCalculator(CalculatorDeps{
+		Tasks: r.tasks, Sequences: r.seqs, VT: r.vt, CMS: r.cms, Config: testConfig(),
+	})
+	exec := &fakeExecutor{committed: true}
+	pool := NewSendPool(8)
+	d := NewDispatcher(DispatcherDeps{
+		Tx: r.tx, Tasks: r.tasks, Counts: r.counts, CMS: r.cms, Executor: exec,
+		Metrics: fakeMetrics{}, Pool: pool, Config: testConfig(),
+		Leaves: explodingLeaves{}, HStates: explodingHStates{},
+	})
+	ctx := context.Background()
+	if err := calc.tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.tick(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func seedReceived(r *rig, key string, weight float64, n int, base int) {
@@ -526,5 +700,72 @@ func TestTimeoutSkipsNonInflight(t *testing.T) {
 	})
 	if err := s.TickForTest(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func hierTestConfig() Config {
+	c := testConfig()
+	c.Hierarchy = domain.HierarchyConfig{
+		Enabled:   true,
+		Separator: "/",
+		Layers: []domain.HierarchyLayer{
+			{Name: "organization", DefaultWeight: 1.0},
+			{Name: "department", DefaultWeight: 1.0},
+		},
+	}
+	return c
+}
+
+// TestDispatcherHierarchicalTick wires the full hierarchical path
+// (planner → lock heads in pick order → node charges → shared send
+// tail) against fakes: seeds two tenants under one parent, tags via
+// the calculator, ticks, and asserts every QUEUED task dispatched
+// with node charges recorded for the internal parent.
+func TestDispatcherHierarchicalTick(t *testing.T) {
+	r := newRig()
+	leaves := &fakeLeaves{b: r.backing}
+	hstates := &fakeHStates{m: map[string]domain.HierarchyNodeState{}}
+	r.tx.leaves = leaves
+	r.tx.hstate = hstates
+	seedReceived(r, "acme/a", 1, 4, 0)
+	seedReceived(r, "acme/b", 1, 4, 1)
+	calc := NewCalculator(CalculatorDeps{
+		Tasks: r.tasks, Sequences: r.seqs, VT: r.vt, CMS: r.cms, Config: hierTestConfig(),
+	})
+	exec := &fakeExecutor{committed: true}
+	pool := NewSendPool(8)
+	d := NewDispatcher(DispatcherDeps{
+		Tx: r.tx, Tasks: r.tasks, Counts: r.counts, CMS: r.cms, Executor: exec,
+		Metrics: fakeMetrics{}, Pool: pool, Config: hierTestConfig(),
+		Leaves: leaves, HStates: hstates,
+	})
+	ctx := context.Background()
+	if err := calc.tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Pool sends run async; wait for all eight.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		exec.mu.Lock()
+		n := len(exec.sends)
+		exec.mu.Unlock()
+		if n == 8 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if len(exec.sends) != 8 {
+		t.Fatalf("sends = %d, want 8", len(exec.sends))
+	}
+	// Node charges landed for the internal parent (and leaves).
+	hstates.mu.Lock()
+	defer hstates.mu.Unlock()
+	if _, ok := hstates.m["acme/"]; !ok {
+		t.Fatalf("no charge recorded for internal node acme/: %v", hstates.m)
 	}
 }
