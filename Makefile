@@ -43,6 +43,13 @@ test-differential:
 bench:
 	$(GO) test -run=NONE -bench=. -benchmem ./pkg/cms/... ./internal/domain/...
 
+# Regenerate the CMS error-curve golden (pkg/cms/testdata/cms-curve.json).
+# Run ONLY when the sketch algorithm intentionally changes — a diff here
+# without an accompanying algorithm change is a regression, not an
+# update. Commit the regenerated file alongside the algorithm change.
+regen-cms-curve:
+	$(GO) test -count=1 -run TestErrorCurve ./pkg/cms/ -args -update-curve
+
 vet:
 	$(GO) vet ./...
 

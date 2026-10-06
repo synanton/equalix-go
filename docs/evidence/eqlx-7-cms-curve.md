@@ -33,11 +33,18 @@ Reading:
   single-row collisions; covered keys read exact). Production
   in-flight cardinalities (tens–hundreds) sit three orders of
   magnitude inside the exact region.
-- **Uniform-100k degrades** (p99 2.0, max 3.0): 100k keys in 65k
-  cells means ~1.5 keys/cell/row with no row escaping collision —
-  width undersized 1.5× for that cardinality, as theory predicts.
-  Honest boundary, not a failure: the scope asks for the envelope,
-  and this is where it bends.
+- **Uniform-100k degrades, consistent with load-factor arithmetic
+  (not a finding about the estimate function).** 1M increments over
+  65k cells ≈ 15 extra counts per cell per row; the min over 5 rows
+  trims that to mean absolute 3.1, but keys colliding with 2+ others
+  in all 5 rows tail to rel 3.0 — predicted ≈1860 such keys
+  (per-row P(≥2 others) ≈ 0.45 at 1.53 keys/cell, ^5 × 100k),
+  observed ≈1000. Same order of magnitude from first-principles
+  occupancy, no hash pathology required. At 1.5 keys/cell/row the
+  width is undersized for the cardinality — exactly what theory
+  predicts, and the numbers match the arithmetic rather than
+  exceeding it. Honest boundary, not a failure: the scope asks for
+  the envelope, and this is where it bends.
 - **Zipfian tail is uncovered, not wrong**: 88k of 100k zipf keys
   never draw (s=1.5 concentrates on the head) and are excluded from
   the error stats AND counted as uncovered — dropping them silently
@@ -45,5 +52,7 @@ Reading:
   (head) keys stay tight (max 0.5).
 - **Zero underestimates in all 8 cells**: one-sidedness holds —
   the load-bearing invariant for in-flight counting (an underestimate
-  would release slots early). Pinned by test assertion, not just
+  would release slots early). The `underestimates` column runs on
+  every cell including uniform-100k (the property assertion loops all
+  cases, not just the small ones). Pinned by test assertion, not just
   observed.

@@ -60,13 +60,18 @@ borderline, it was forced. All values checkable against
 | go (JvG) | {a:9 b:6 c:20} | — |
 | go1/go2 (GvG) | {a:9 b:6 c:20} / {a:9 b:6 c:20} | — |
 
-Byte-identical across all four sides. Floor assertion: controller
-RPS ∈ [1.0, 2.0] for the duration (never exceeded 2× the 1.0 floor;
-observed maxima 1.80–1.98 across the four sides), all 150 tasks
+Byte-identical across all four sides. Floor assertion, stated
+comparatively rather than fitted: code defines the floor as exactly
+min_rps = 1.0 on both sides (Java min-rps, Go MinRPS) — a minimum,
+not a pin, so the controller observably ramped 1.1 to 1.98 on
+completions (a dozen 5% UP steps: correct behavior, not drift). The
+regime claim is separation: below-floor max 1.98 vs above-floor
+operating peaks 10.9 to 63, an order of magnitude apart — the
+workload was too small to drive meaningful adaptation either way.
+Falsification condition: any side exceeding 20% of the above-floor
+minimum peak (0.2 x 10.9 = 2.2) breaks the separation. All 150 tasks
 terminal (DB-verified SUCCEEDED on the JvG pair), promotions 0
-everywhere. The tolerance is the falsification condition — a run
-drifting to 2.5 could not be reported as "stayed at floor" without
-tripping it. The floor assertions matter: this run proves the floor
+everywhere. The floor assertions matter: this run proves the floor
 dispatches (nonzero count), holds (never drops to zero), and
 terminates everything — without them it would be vacuous on both
 axes (no clamp question AND no floor evidence), i.e. a null result
