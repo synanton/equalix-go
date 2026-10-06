@@ -23,6 +23,7 @@ require (
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/redis/go-redis/v9 v9.5.5 // pinned: v9.6+ needs go >= 1.25 — see consolidated spec §13 NOTE; upgrade with the toolchain, never alone
 	github.com/prometheus/client_golang v1.19.1 // pinned: v1.24.x needs go >= 1.25, conflicts with the 1.22 pin — see spec §13 NOTE; do not upgrade without bumping go, CI setup-go, and dependents
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
