@@ -248,11 +248,35 @@ func waitQuiesced(ctx context.Context, dsn string, stub *Stub, timeout time.Dura
 // measureFrom slices the stub log: entries below it are the warm-up
 // pre-phase (RunWarmup's return), excluded from order, marker, and warmup
 // counts. Zero is the cold class — the whole log is the measurement.
+// SubmitPacePerSec reads the measurement ingest pace (tasks/s).
+// EQUALIX_SUBMIT_PACE unset or <= 0 means ASAP burst — the historical
+// behavior every cold/warm run to date used (the workload files' offset
+// fields are vestigial for the live path: RunSide never honored them).
+// Fixed-rate residuals (promotion-deadline sweep) set an explicit pace;
+// the value travels into the methodology string, never silently.
+func SubmitPacePerSec() float64 {
+	if v := os.Getenv("EQUALIX_SUBMIT_PACE"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			return f
+		}
+	}
+	return 0
+}
+
 func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task, stub *Stub, drainTimeout time.Duration, measureFrom int) (SideResult, error) {
 	var out SideResult
 	client := &http.Client{Timeout: 10 * time.Second}
 	created := map[string]int64{}
 	weights := map[string]float64{}
+	// Measurement ingest pace: fixed-rate residuals pace here; 0 keeps
+	// the historical ASAP burst (all cold/warm runs to date).
+	pace := SubmitPacePerSec()
+	var paceTick <-chan time.Time
+	if pace > 0 {
+		tick := time.NewTicker(time.Duration(float64(time.Second) / pace))
+		defer tick.Stop()
+		paceTick = tick.C
+	}
 	// Both schedulers mint their own IDs at ingest; the harness tracks
 	// workload-ID → service-ID and maps back everywhere (status polls,
 	// priority reads, stub-log join). No API carries the harness ID.
@@ -261,6 +285,13 @@ func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task
 	var marker time.Time
 	first := true
 	for _, t := range workload {
+		if paceTick != nil {
+			select {
+			case <-ctx.Done():
+				return out, ctx.Err()
+			case <-paceTick:
+			}
+		}
 		weights[t.Tenant] = t.Weight
 		stamp, svcID, err := SubmitTask(ctx, client, svc.BaseURL, apiKey, t, time.Now())
 		if err != nil {
