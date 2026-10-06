@@ -319,6 +319,7 @@ sole source is `internal/adapter/metrics` — this table mirrors it:
 - `equalix_cms_warmup_duration_seconds` (histogram)
 - `equalix_rps_current`, `equalix_received_queue_depth` (gauges)
 - `equalix_cms_drift_estimate{tenant}` (gauge, capped + truncated)
+- `equalix_cms_redis_degraded` (gauge: 1 while dispatch runs local because Redis is unreachable)
 - `equalix_metrics_cardinality_exceeded_total{metric}` (over-cap drops)
 
 Deferred (no port source yet): `rps_target`, brake/deadband state

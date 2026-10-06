@@ -16,7 +16,18 @@ type WatchdogDeps struct {
 	Metrics port.Metrics
 	Config  Config
 	Log     *slog.Logger
+	// Locker serializes rebuilds across instances sharing one CMS
+	// backend (EQLX-8 Redis). Nil = unguarded (local sketch: repair is
+	// idempotent, concurrent ticks converge — the pinned local
+	// behavior, unchanged). Set with RebuildLock for shared backends.
+	Locker port.Locker
 }
+
+// RebuildLockName is the advisory-lock name serializing CMS rebuilds
+// across instances (EQLX-8). Distinct from the migration lock by
+// mandate: sharing it would serialize 5-minute reconciles behind
+// deploy-time DDL.
+const RebuildLockName = "cms-watchdog-rebuild"
 
 // Watchdog reconciles counts and CMS against the task table.
 type Watchdog struct {
@@ -125,9 +136,28 @@ func (w *Watchdog) tick(ctx context.Context) error {
 	for k, n := range actual {
 		snapshot[k] = int64(n)
 	}
+	// Rebuild under the advisory lock when one is wired (shared CMS
+	// backends): concurrent rebuilds would interleave DEL/re-ADD
+	// sequences into a merged partial state. Nil locker = unguarded
+	// local path (idempotent repair converges — unchanged behavior).
+	release := func() {}
+	if w.deps.Locker != nil {
+		ok, rel, err := w.deps.Locker.Lock(ctx, RebuildLockName)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			// Another instance is rebuilding: skip this tick, retry
+			// next interval. Repair is periodic, never urgent.
+			return nil
+		}
+		release = rel
+	}
 	if err := w.deps.CMS.Rebuild(ctx, snapshot); err != nil {
+		release()
 		return err
 	}
+	release()
 
 	// Drift is always a bug: info summary like Java, warn when nonzero so
 	// EQLX-6 alerting has a log signal alongside the metric. No repair

@@ -72,6 +72,8 @@ func TestAllWireNamesRegistered(t *testing.T) {
 	a.RecordDispatch("u")
 	a.RecordDispatch("overflow")
 	a.RecordCompletion("t", "success", 1)
+	a.SetCMSDegraded(true)
+	a.SetCMSDegraded(false)
 	a.ObserveDispatchLatency(0.001)
 	a.ObserveTimeoutLatency(0.1)
 	a.ObserveWatchdogReconciliation(0.1)
@@ -84,7 +86,7 @@ func TestAllWireNamesRegistered(t *testing.T) {
 		DispatchDecisionLatency, TimeoutDetectionLatency,
 		WatchdogReconciliationDuration, CMSWarmupDuration,
 		RPSCurrent, ReceivedQueueDepth, CMSDriftEstimate,
-		CardinalityExceeded,
+		CMSRedisDegraded, CardinalityExceeded,
 	} {
 		if _, ok := families(t, a)[name]; !ok {
 			t.Fatalf("wire name %s not registered", name)

@@ -119,4 +119,5 @@ func (discardMetrics) ObserveWatchdogReconciliation(float64)  {}
 func (discardMetrics) ObserveCMSWarmup(float64)               {}
 func (discardMetrics) SetRPS(float64)                         {}
 func (discardMetrics) SetQueueDepth(int)                      {}
+func (discardMetrics) SetCMSDegraded(bool)                    {}
 func (discardMetrics) PublishDrift(map[string]int64)          {}

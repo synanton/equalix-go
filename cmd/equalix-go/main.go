@@ -28,9 +28,11 @@ import (
 	chiadapter "github.com/synanton/equalix-go/internal/adapter/http"
 	promadapter "github.com/synanton/equalix-go/internal/adapter/metrics"
 	pgadapter "github.com/synanton/equalix-go/internal/adapter/postgres"
+	redisadapter "github.com/synanton/equalix-go/internal/adapter/redis"
 	"github.com/synanton/equalix-go/internal/adaptive"
 	"github.com/synanton/equalix-go/internal/domain"
 	"github.com/synanton/equalix-go/internal/jobs"
+	"github.com/synanton/equalix-go/internal/port"
 	"github.com/synanton/equalix-go/migrations"
 	"github.com/synanton/equalix-go/pkg/cms"
 	"gopkg.in/yaml.v3"
@@ -105,6 +107,18 @@ func (c *localCMS) Total(_ context.Context) (int64, error) {
 	return c.s.Total(), nil
 }
 
+// AddBatch loops Add: local application is per-cell arithmetic, no
+// round trips to amortize — callers must not assume cross-key
+// atomicity from the port method (see port.CMSStore).
+func (c *localCMS) AddBatch(ctx context.Context, deltas map[string]int64) error {
+	for k, d := range deltas {
+		if err := c.Add(ctx, k, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *localCMS) Rebuild(_ context.Context, m map[string]int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -135,9 +149,14 @@ type fileConfig struct {
 	MetricsDriftKeys *int    `yaml:"metrics-drift-max-keys"`
 	MigrateOnStartup *bool   `yaml:"migrate-on-startup"`
 	MigrationsDir    *string `yaml:"migrations-dir"`
+	RedisEnabled     *bool   `yaml:"redis-enabled"`
+	RedisURL         *string `yaml:"redis-url"`
+	RedisTimeoutSecs *int    `yaml:"redis-timeout-secs"`
 }
 
-// settings is the resolved runtime configuration.
+// settings is the resolved runtime configuration. TimeoutSecs fields
+// are flag carriers only (seconds as configured); Timeout holds the
+// resolved duration. Keep them paired when adding knobs.
 type settings struct {
 	DSN, Addr, APIKey    string
 	MaxPayload           int
@@ -146,6 +165,10 @@ type settings struct {
 	TenantCap, DriftKeys int
 	MigrateOnStartup     bool
 	MigrationsDir        string
+	RedisEnabled         bool
+	RedisURL             string
+	RedisTimeoutSecs     int
+	RedisTimeout         time.Duration
 }
 
 func loadFileConfig(path string, explicit bool) (fileConfig, error) {
@@ -231,6 +254,15 @@ func resolveSettings(set map[string]bool, fl settings, getenv func(string) strin
 	} else if fc.MigrateOnStartup != nil {
 		out.MigrateOnStartup = *fc.MigrateOnStartup
 	}
+	// Redis opt-in, same strict precedence. Default off: unset means
+	// local CMS with byte-identical behavior (parity preserved).
+	if set["redis-enabled"] {
+		out.RedisEnabled = fl.RedisEnabled
+	} else if v := getenv("EQUALIX_REDIS_ENABLED"); v != "" {
+		out.RedisEnabled = envBool(v)
+	} else if fc.RedisEnabled != nil {
+		out.RedisEnabled = *fc.RedisEnabled
+	}
 	var err error
 	if out.MaxPayload, err = num("max-payload-bytes", fl.MaxPayload, "EQUALIX_MAX_PAYLOAD_BYTES", fc.MaxPayloadBytes, 1048576); err != nil {
 		return out, err
@@ -241,7 +273,47 @@ func resolveSettings(set map[string]bool, fl settings, getenv func(string) strin
 	if out.DriftKeys, err = num("metrics-drift-max-keys", fl.DriftKeys, "EQUALIX_METRICS_DRIFT_MAX_KEYS", fc.MetricsDriftKeys, 1000); err != nil {
 		return out, err
 	}
+	out.RedisURL = str("redis-url", fl.RedisURL, "EQUALIX_REDIS_URL", strVal(fc.RedisURL), "")
+	var redisTimeoutSecs int
+	if redisTimeoutSecs, err = num("redis-timeout-secs", fl.RedisTimeoutSecs, "EQUALIX_REDIS_TIMEOUT_SECS", fc.RedisTimeoutSecs, 5); err != nil {
+		return out, err
+	}
+	out.RedisTimeout = time.Duration(redisTimeoutSecs) * time.Second
 	return out, nil
+}
+
+// warmupSketch seeds the CMS backend with lock + timeout discipline:
+// local mode keeps the historical fail-fast (in-memory rebuild cannot
+// fail except on cancelled context, which fails downstream anyway);
+// Redis mode takes the warm-up advisory lock (distinct key — never the
+// migration or watchdog keys), 30s timeout, and degrades on error
+// instead of failing (warn + continue: degraded ops plus the next
+// watchdog rebuild converge; blocking serving on a cache fill would
+// conflate "not servable" with "not yet warm"). A denied lock means
+// another instance is seeding from the same snapshot source — skip,
+// theirs covers it.
+func warmupSketch(ctx context.Context, locker interface {
+	Lock(ctx context.Context, name string) (bool, func(), error)
+}, s settings, cmsketch port.CMSStore, snapshot map[string]int64) error {
+	if !s.RedisEnabled {
+		return cmsketch.Rebuild(ctx, snapshot)
+	}
+	warmCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	ok, release, err := locker.Lock(warmCtx, "cms-warmup")
+	if err != nil {
+		return fmt.Errorf("warm-up lock: %w", err)
+	}
+	if !ok {
+		slog.Info("cms warm-up skipped, another instance seeding")
+		return nil
+	}
+	defer release()
+	if err := cmsketch.Rebuild(warmCtx, snapshot); err != nil {
+		slog.Warn("cms warm-up failed, proceeding degraded", "err", err)
+		return nil
+	}
+	return nil
 }
 
 // countMigrationFiles returns the number of .sql files in the embedded
@@ -319,6 +391,9 @@ func run() error {
 		driftKeys        = flag.Int("metrics-drift-max-keys", 0, "per-report drift series cap, sorted truncation (default 1000)")
 		migrateOnStartup = flag.Bool("migrate-on-startup", false, "apply pending migrations before serving (or EQUALIX_MIGRATE_ON_STARTUP=true); default false — multi-instance deploys migrate as a separate step")
 		migrationsDir    = flag.String("migrations-dir", "", "read goose files from disk instead of the embedded set (operators who inspect SQL first)")
+		redisEnabled     = flag.Bool("redis-enabled", false, "use shared Redis CMS instead of the local sketch (or EQUALIX_REDIS_ENABLED=true); default false — local behavior byte-identical")
+		redisURL         = flag.String("redis-url", "", "Redis host:port (or EQUALIX_REDIS_URL); required when redis-enabled")
+		redisTimeoutSecs = flag.Int("redis-timeout-secs", 0, "Redis dial/read/write timeout in seconds (default 5)")
 		configPath       = flag.String("config", "/etc/equalix/config.yaml", "YAML config file (loaded when present; missing explicit path is fatal, missing default is ignored)")
 	)
 	flag.Parse()
@@ -337,7 +412,8 @@ func run() error {
 		settings{DSN: *dsn, Addr: *addr, APIKey: *apiKey, MaxPayload: *maxPayload,
 			ExecBase: *execBase, MetricsPath: *metricsPath,
 			TenantCap: *tenantCap, DriftKeys: *driftKeys,
-			MigrateOnStartup: *migrateOnStartup, MigrationsDir: *migrationsDir},
+			MigrateOnStartup: *migrateOnStartup, MigrationsDir: *migrationsDir,
+			RedisEnabled: *redisEnabled, RedisURL: *redisURL, RedisTimeoutSecs: *redisTimeoutSecs},
 		os.Getenv, fc)
 	if err != nil {
 		return err
@@ -389,7 +465,25 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("metrics: %w", err)
 	}
-	cmsketch := &localCMS{s: cms.New(65536, 5)}
+	// CMS backend selection: local sketch unless redis-enabled. The
+	// local path is untouched by EQLX-8 (byte-identical behavior —
+	// the parity-preservation test asserts the flag-off branch
+	// constructs localCMS, not the adapter).
+	var cmsketch port.CMSStore = &localCMS{s: cms.New(65536, 5)}
+	if s.RedisEnabled {
+		if s.RedisURL == "" {
+			return fmt.Errorf("redis-enabled without --redis-url (or EQUALIX_REDIS_URL)")
+		}
+		radapter, err := redisadapter.New(ctx, redisadapter.Config{
+			Addr:    s.RedisURL,
+			Timeout: s.RedisTimeout,
+		}, 5, 65536, metrics)
+		if err != nil {
+			return fmt.Errorf("redis cms: %w", err)
+		}
+		defer radapter.Close()
+		cmsketch = radapter
+	}
 	// Throttle owns its own send pool as the FailedSends source
 	// (DECISION-5 wiring: pool → controller, no wrapper).
 	sendpool := jobs.NewSendPool(cfg.DispatchWorkers)
@@ -474,7 +568,7 @@ func run() error {
 	warmStart := time.Now()
 	if actual, err := stores.Tasks.CountInFlight(ctx); err != nil {
 		return fmt.Errorf("warm-up snapshot: %w", err)
-	} else if err := cmsketch.Rebuild(ctx, toInt64(actual)); err != nil {
+	} else if err := warmupSketch(ctx, locker, s, cmsketch, toInt64(actual)); err != nil {
 		return fmt.Errorf("warm-up rebuild: %w", err)
 	} else {
 		slog.Info("cms warmed up", "keys", len(actual))
@@ -493,7 +587,7 @@ func run() error {
 		}),
 		jobs.NewWatchdog(jobs.WatchdogDeps{
 			Tasks: stores.Tasks, Counts: stores.Counts, CMS: cmsketch,
-			Metrics: metrics, Config: cfg,
+			Metrics: metrics, Config: cfg, Locker: locker,
 		}),
 		jobs.NewTimeout(jobs.TimeoutDeps{
 			Tx: stores, Tasks: stores.Tasks, Counts: stores.Counts,

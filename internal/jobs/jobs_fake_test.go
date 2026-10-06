@@ -226,6 +226,15 @@ func (f *fakeCMS) Total(_ context.Context) (int64, error) {
 	return t, nil
 }
 
+func (f *fakeCMS) AddBatch(ctx context.Context, deltas map[string]int64) error {
+	for k, d := range deltas {
+		if err := f.Add(ctx, k, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (f *fakeCMS) Rebuild(_ context.Context, m map[string]int64) error {
 	f.b.mu.Lock()
 	defer f.b.mu.Unlock()
@@ -284,6 +293,7 @@ func (fakeMetrics) ObserveCMSWarmup(float64)               {}
 func (fakeMetrics) SetRPS(float64)                         {}
 func (fakeMetrics) PublishDrift(map[string]int64)          {}
 func (fakeMetrics) SetQueueDepth(int)                      {}
+func (fakeMetrics) SetCMSDegraded(bool)                    {}
 
 type rig struct {
 	backing *fakeBacking
