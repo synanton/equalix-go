@@ -1,0 +1,78 @@
+# EQLX-7 release: tag + GitHub release + GHCR image.
+#
+# The dispatch trigger exists so the pipeline is rehearsed WITHOUT a
+# public tag: dry_run=true (default) builds, resolves tags, and
+# extracts notes, but pushes nothing and creates no release. A
+# first-run failure discovered via the real v0.1.0 tag would be a
+# public broken release — rehearse first, tag after. If dispatch
+# cannot exercise some step, fall back to a v0.1.0-rc1 tag run.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and resolve everything without pushing or releasing"
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Resolve version and tags
+        id: ver
+        run: |
+          FILE_VER=$(cat VERSION)
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            [ "$TAG" = "v$FILE_VER" ] || { echo "tag $TAG != VERSION $FILE_VER"; exit 1; }
+            echo "push=true" >> "$GITHUB_OUTPUT"
+            echo "image_tags=ghcr.io/synanton/equalix-go:v$FILE_VER,ghcr.io/synanton/equalix-go:sha-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+            echo "image_tags=ghcr.io/synanton/equalix-go:dryrun-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$FILE_VER" >> "$GITHUB_OUTPUT"
+
+      - name: Extract release notes
+        run: |
+          awk '/^## \[${{ steps.ver.outputs.version }}\]/{f=1;next}/^## \[/{f=0}f' CHANGELOG.md > /tmp/notes.md
+          [ -s /tmp/notes.md ] || { echo "no CHANGELOG section for ${{ steps.ver.outputs.version }}"; exit 1; }
+          head -5 /tmp/notes.md
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: steps.ver.outputs.push == 'true' || inputs.dry_run == false
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ steps.ver.outputs.push == 'true' || inputs.dry_run == false }}
+          tags: ${{ steps.ver.outputs.image_tags }}
+          build-args: VERSION=${{ steps.ver.outputs.version }}
+
+      - name: Create GitHub release
+        if: steps.ver.outputs.push == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${GITHUB_REF#refs/tags/}" --title "v${{ steps.ver.outputs.version }}" --notes-file /tmp/notes.md
