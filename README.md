@@ -52,6 +52,7 @@ has. Starvation splits in two:
 | Starvation — promotion deadline | Java `max-queued-time-ms` (60s) | 🔶 characterized, not gated (cold asymmetry Go ~780 / Java ~1000; warm 0/0 both sides) |
 | Starvation — K=3 window gate | **none** (harness-original, CORRECTION-3) | — by construction; validated by fixture + spec, never by differential |
 | Cross-instance shares (fleet aggregate) | same workload, two racers, shared PG + Redis | ✅ fleet ±6 (N=5 control-derived; single-instance ±2 does not transfer — post-commit CMS window at two-tick interleave) |
+| Hierarchical shares (parent + within-parent) | Java hierarchy-enabled oracle, same tree config | ✅ both levels (JvG N=3, children exact, parents <1; flat claim untouched — separate path) |
 
 ---
 
@@ -68,13 +69,9 @@ It targets asynchronous inference workloads where many tenants share LLM/GPU cap
 - **Adaptive RPS controller** with latency EMA, error-rate brake, and dead-band dampener
 - **Watchdog reconciliation** (every 5 min) to repair `client_counts` and CMS drift against the authoritative task table
 - **Shared CMS via Redis** — cross-instance in-flight view (EQLX-8 evidence: fleet ±6, no double-dispatch)
-- **Hierarchical fairness** — `flat` mode validated (EQLX-5 warm-class); `hierarchical` path lands in EQLX-9 behind the existing `fairness_mode` flag (default `flat`, frozen behavior)
+- **Hierarchical fairness** — flat validated (EQLX-5) and hierarchical validated (EQLX-9 evidence: parent 1:2 + within-parent 1:2:7, N=3 runs)
 - Per-key hard quotas, anti-starvation aging plus `max-queued-time-ms` promotion
 - **Sequential execution mode** with per-key ordering, block recovery, and result passthrough
-
-### Planned (EQLX-9 next)
-
-- **Hierarchical fairness path** — validated independently in EQLX-9; flat path unaffected
 
 ### Task Lifecycle
 
