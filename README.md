@@ -65,8 +65,14 @@ It targets asynchronous inference workloads where many tenants share LLM/GPU cap
 - **Count-Min Sketch** for O(1) approximate in-flight counting (~2.6 MB at `width=65536`, `depth=5`)
 - **Adaptive RPS controller** with latency EMA, error-rate brake, and dead-band dampener
 - **Watchdog reconciliation** (every 5 min) to repair `client_counts` and CMS drift against the authoritative task table
-- **Hierarchical fairness** (`flat` | `hierarchical`), per-key hard quotas, anti-starvation aging plus `max-queued-time-ms` promotion
+- **Hierarchical fairness** — `flat` mode validated (EQLX-5 warm-class); `hierarchical` path lands in EQLX-9 behind the existing `fairness_mode` flag (default `flat`, frozen behavior)
+- Per-key hard quotas, anti-starvation aging plus `max-queued-time-ms` promotion
 - **Sequential execution mode** with per-key ordering, block recovery, and result passthrough
+
+### Planned (EQLX-8 next, then EQLX-9)
+
+- **Redis-backed CMS** — shared cross-instance sketch (EQLX-8); local sketch until then (per-instance in-flight views — no shared-fairness claim yet)
+- **Hierarchical fairness path** — validated independently in EQLX-9; flat path unaffected
 
 ### Task Lifecycle
 
@@ -102,7 +108,7 @@ Measured fairness in Java, with tenants at weights 1 : 2 : 7 continuously backlo
 - **Single static binary** — millisecond startup, tiny container images, no JVM
 - **Memory efficiency** — typically 4–6× lower RSS than equivalent JVM services in containers
 - **Concurrency model** — goroutines and channels map naturally to the dispatcher, watchdog, RPS controller, and priority calculator jobs
-- **Idiomatic dependency stack** — `pgx`, `go-redis`, `chi`, `prometheus/client_golang`
+- **Idiomatic dependency stack** — `pgx`, `chi`, `prometheus/client_golang` (`go-redis` declared; Redis-backed CMS lands in EQLX-8)
 
 ---
 
