@@ -70,19 +70,36 @@ dispatch order leaves a longer tail. Mechanism unattributed (N=1
 Java at hi); the trajectory table is what a replicate compares
 against.
 
-## Zero-tag refutation (the promoted query is clean here)
+## Zero-tag refutation (code-verified + trajectory-confirmed)
 
 Both implementations CAN tag priority 0 at empty in-flight
 (`round(F)` with small F, zero pressure) — so `priority <= 0` mixes
-starvation promotions with zero-tags in principle. Trajectory shape
-refutes the pollution in practice: promoted stays 0 through the
-entire dispatch phase on both sides (e.g. hi Java (149,0) → (1200,0)
-→ (2000,0)) and climbs only post-drain ((2000,0) → (2000,236) →
-(2000,366)) — the QUEUED-drain phase, exactly when aged tasks hit the
-backstop. Early zero-tagging would read as nonzero promoted
-mid-dispatch; it reads 0. The EQLX-5 promotion narrative (cold
-asymmetry, avalanche NOTE) rests on true starvation counts, not tag
-artifacts — verified, not assumed.
+starvation promotions with zero-tags in principle. Three code checks
+(verified pre-merge, not assumed):
+
+1. **Metric definition** (`trace.go`): `WHERE priority <= 0`, no
+   `has_priority` guard — vulnerable in principle. (There is no
+   `has_priority` column: the adapter stores NULL when `HasPriority`
+   is false, so the query already implies non-null — but it cannot
+   separate a 0-tag from a 0-promotion. Both write 0/non-null.)
+2. **Save is full-row** (`tasks.go`: `UPDATE tasks SET ... priority =
+   $5 ...`) — writes whatever the struct carries. Would zero on a
+   struct that forgot to load priority.
+3. **FindByID loads faithfully** (full `taskColumns` incl. priority;
+   `HasPriority = priority.Valid`) **and neither completion path
+   touches priority** (`markCommitted` and the webhook handler mutate
+   status/completed only, then Save the round-tripped struct).
+
+So the only writers of ≤0 rows are the starvation backstop
+(calculator + dispatcher `PromoteStarved`, both setting 0 + true)
+and calculator zero-tagging. Trajectory shape eliminates the second
+for these runs: promoted stays 0 through the entire dispatch phase
+(e.g. hi Java (149,0) → (1200,0) → (2000,0)) and climbs only
+post-drain ((2000,0) → (2000,236) → (2000,366)) — the QUEUED-drain
+phase, exactly when aged tasks hit the backstop. Early zero-tagging
+would read as nonzero promoted mid-dispatch; it reads 0. The EQLX-5
+promotion narrative (cold asymmetry, avalanche NOTE) rests on true
+starvation counts — code-verified and trajectory-confirmed.
 
 ## Negative control (warm-paced 21/s)
 
