@@ -29,8 +29,13 @@ style): at each node, pick the backlogged child minimizing
 in-flight pressure), ties broken by key. The chosen leaf and every
 node above it are charged `quantum/w`. Each child gets a `w/Σw`
 share of its parent among backlogged siblings, at every layer.
-NOT `max(parent_V, child_V, global_V) + quantum/weight` — spec §6.1's
-hinted formula is not what the code does; the code nests.
+A natural-but-wrong generalization an implementer would write from
+the flat formula is single-stage `max(parent_V, child_V, global_V) +
+quantum/weight` — coherent, review-passing, and wrong. (An earlier
+draft of this section attributed that hint to spec §6.1; verified:
+§6.1 already describes nested descent correctly and contains no
+such formula. The trap caught the scope author, not the spec — which
+is itself evidence the trap is real.)
 
 ### 3. Weights: layer defaults + path overrides, leaves use task weight
 
