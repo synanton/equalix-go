@@ -5,7 +5,7 @@ Security) per version. Design rationale lives in spec §13
 (DECISION/CORRECTION/NOTE), cited where user-visible change follows
 from it — this file records what changed, the spec records why.
 
-## [0.1.0] — WIP (final numbers TBD before tag)
+## [0.1.0] - 2026-10-06
 
 First release. Pre-alpha: API unstable, deployable, differentially
 validated.
