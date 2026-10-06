@@ -248,6 +248,20 @@ func waitQuiesced(ctx context.Context, dsn string, stub *Stub, timeout time.Dura
 // measureFrom slices the stub log: entries below it are the warm-up
 // pre-phase (RunWarmup's return), excluded from order, marker, and warmup
 // counts. Zero is the cold class — the whole log is the measurement.
+// HonorOffsets reports whether measurement ingest follows the workload
+// file's submitted_at offsets (EQUALIX_HONOR_OFFSETS=1) instead of the
+// historical ASAP burst (or SubmitPace). Default off: every cold/warm
+// run to date submitted ASAP, and flipping the default would rewrite
+// that history's ingest dynamics. Offsets resolve against the run-start
+// marker (first accepted ingest); a task whose offset already passed
+// submits immediately (never sleeps negative). Phased workloads
+// (idle-tenant: active → idle → return) need this mode — ASAP cannot
+// express absence.
+func HonorOffsets() bool {
+	v := os.Getenv("EQUALIX_HONOR_OFFSETS")
+	return v == "1" || v == "true" || v == "TRUE" || v == "True"
+}
+
 // SubmitPacePerSec reads the measurement ingest pace (tasks/s).
 // EQUALIX_SUBMIT_PACE unset or <= 0 means ASAP burst — the historical
 // behavior every cold/warm run to date used (the workload files' offset
@@ -290,12 +304,25 @@ func RunSide(ctx context.Context, svc SideConfig, apiKey string, workload []Task
 	svcToWorkload := map[string]string{}
 	var marker time.Time
 	first := true
+	honor := HonorOffsets()
 	for _, t := range workload {
 		if paceTick != nil {
 			select {
 			case <-ctx.Done():
 				return out, ctx.Err()
 			case <-paceTick:
+			}
+		}
+		if honor && !first {
+			// Phased submit: wait for the task's file offset against
+			// the run-start marker. Behind schedule submits at once
+			// (a slow service must not time-travel the workload).
+			if wait := time.Until(marker.Add(time.Duration(t.SubmittedAtOffsetMs) * time.Millisecond)); wait > 0 {
+				select {
+				case <-ctx.Done():
+					return out, ctx.Err()
+				case <-time.After(wait):
+				}
 			}
 		}
 		weights[t.Tenant] = t.Weight
@@ -496,6 +523,42 @@ func ResetDB(ctx context.Context, dsn string) error {
 	return nil
 }
 
+// IdleResult is the idle-tenant observable: per-side tenant counts in
+// the first 1000 dispatches created at/after the return boundary.
+// Record-only by construction (N=1 pair each, below the rate-criterion
+// sample floor): the verdict never gates on it. The evidence doc
+// compares the four numbers (JvG + GvG × above/below floor), not the
+// test.
+type IdleResult struct {
+	Tenant   string                    `json:"tenant"`
+	ReturnMs int64                     `json:"return_ms"`
+	Window   map[string]map[string]int `json:"window"`
+}
+
+// IdleWindow counts tenants over the first window dispatches created at
+// or after the return boundary (marker + returnMs). Returns the counts
+// and the boundary sequence (dispatches before it are pre-return
+// backlog, not the measured window).
+func IdleWindow(log RunLog, marker time.Time, tenant string, returnMs int64, window int) (map[string]int, int) {
+	boundary := marker.UnixMilli() + returnMs
+	start := len(log.Order)
+	for i, d := range log.Order {
+		if created, ok := log.Created[d.TaskID]; ok && created >= boundary {
+			start = i
+			break
+		}
+	}
+	counts := map[string]int{}
+	end := start + window
+	if end > len(log.Order) {
+		end = len(log.Order)
+	}
+	for _, d := range log.Order[start:end] {
+		counts[d.Tenant]++
+	}
+	return counts, start
+}
+
 // TracePoint is one 5s sample of scheduler state during a live run.
 // Three series per side (RPS, cumulative dispatched, cumulative promoted)
 // attribute divergence to ramp timing vs scheduling: if RPS trajectories
@@ -509,6 +572,11 @@ type TracePoint struct {
 	// measurement count is total minus results.json:prephase[side].
 	TotalDispatched int `json:"total_dispatched_including_prephase"`
 	Promoted        int `json:"promoted"`
+	// V is the scheduler system virtual clock at sample time. Idle
+	// analysis reads V advance across the idle window from this series
+	// (no separate V query needed post-hoc); -1 when unreadable, same
+	// sentinel discipline as RPS.
+	V float64 `json:"v"`
 }
 
 // StartupInfo is one side's spawn → ready → first-dispatch record: the
@@ -568,9 +636,11 @@ type Result struct {
 	Prephase map[string]int `json:"prephase,omitempty"`
 	// Startup holds the per-side spawn → ready → first-dispatch record:
 	// runtime characterization for the matrix, never an acceptance input.
-	Startup  map[string]StartupInfo `json:"startup,omitempty"`
-	Pass     bool                   `json:"pass"`
-	Mismatch *Mismatch              `json:"mismatch,omitempty"`
+	Startup map[string]StartupInfo `json:"startup,omitempty"`
+	// Idle holds the idle-tenant observable when measured (record-only).
+	Idle     *IdleResult `json:"idle,omitempty"`
+	Pass     bool        `json:"pass"`
+	Mismatch *Mismatch   `json:"mismatch,omitempty"`
 }
 
 // Artifact is the full WriteResult input: eleven positional params proved
@@ -588,6 +658,7 @@ type Artifact struct {
 	Warmup      map[string]int
 	Prephase    map[string]int
 	Startup     map[string]StartupInfo
+	Idle        *IdleResult
 	MM          *Mismatch
 }
 
@@ -598,7 +669,7 @@ func WriteResult(a Artifact) error {
 	if err := os.MkdirAll(a.Dir, 0o755); err != nil {
 		return err
 	}
-	res := Result{Resolved: *a.Resolved, Method: a.Method, Traces: a.Traces, Calibration: a.Calibration, StatusFetch: a.Fetch, Warmup: a.Warmup, Prephase: a.Prephase, Startup: a.Startup, Pass: a.MM == nil, Mismatch: a.MM}
+	res := Result{Resolved: *a.Resolved, Method: a.Method, Traces: a.Traces, Calibration: a.Calibration, StatusFetch: a.Fetch, Warmup: a.Warmup, Prephase: a.Prephase, Startup: a.Startup, Idle: a.Idle, Pass: a.MM == nil, Mismatch: a.MM}
 	raw, err := json.MarshalIndent(res, "", "  ")
 	if err != nil {
 		return err
