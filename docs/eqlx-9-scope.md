@@ -119,6 +119,21 @@ case.
 - Differential hierarchical workloads (Java with hierarchy enabled;
   flat-tenant claim untouched).
 
+## Decided: mirror the two-path structure, do not unify
+
+Java dispatches through one of two paths (`DispatcherService`
+branches on `fairnessHierarchy.isEnabled()`). Go mirrors: the
+`hierarchy.enabled` flag selects the flat path (EQLX-5 code,
+untouched) or the new hierarchical path. Cost is one branch in
+dispatch selection; benefit is EQLX-5's warm-class evidence keeps
+citing the exact code it validated — no re-verification, no
+"reduces correctly" restating. The unify alternative (single path,
+flat as max_depth=1 hierarchy) is defensible but would retire the
+tested flat path, making flat-path re-verification against the
+pre-EQLX-9 baseline an explicit new deliverable. Parity-conservative
+wins by default in this project; unify stays off the table unless a
+future phase re-opens it with that deliverable attached.
+
 ## If the read had disagreed with extraction
 
 It did not. Had hierarchy been default-on in a way the spec never
