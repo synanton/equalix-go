@@ -35,6 +35,12 @@ This is **not a language port**. The Java code is the behavioral reference; the 
 workloads with real fairness measurement (EQLX-5 gate: warm-class w2000,
 JvG 0/5 fails vs GvG 0/5 fails, within one-run slack).
 
+Explicitly out of scope for v0.1.0 (on the list, not on the runway):
+Java cold-startup cell (blocked on a fresh host), N=10 escalation
+(on demand only), cross-instance/config-sensitivity/payload-
+sensitivity/stability characterization. ⬜ rows above are deferred
+by decision, not pending by oversight.
+
 #### Differential dimensions (gate-level)
 
 Run-level evidence: [`docs/evidence/eqlx-5-warm-class.md`](docs/evidence/eqlx-5-warm-class.md)
