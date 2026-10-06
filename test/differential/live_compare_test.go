@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	pgadapter "github.com/synanton/equalix-go/internal/adapter/postgres"
 )
 
 // shaOr reads a build SHA for results attribution. "Unrecorded" is an
@@ -134,7 +136,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runOne := func(name, svcURL string, stubPort int, dsn string, start func() (*Proc, error)) SideResult {
+	runOne := func(name, svcURL string, stubPort int, dsn string, ensureSchema bool, start func() (*Proc, error)) SideResult {
 		stub, err := NewStub(StubConfig{
 			Port: stubPort, Latency: DefaultLatency(),
 			CompleteBase: svcURL, APIKey: apiKey,
@@ -154,6 +156,17 @@ func TestLiveJavaVsGo(t *testing.T) {
 		// Java boot, manual apply on Go). Resetting before launch would
 		// fail on missing relations; resetting here guarantees identical
 		// fresh state per run regardless of prior runs.
+		// Go sides additionally self-heal schema: a fresh database from
+		// the compose pg-init path has roles + empty DBs but no tables —
+		// EnsureSchema applies the embedded goose set iff tasks is
+		// absent (no-op otherwise). Java sides never take this path:
+		// Flyway owns that schema, and goose-migrating it would fork
+		// the source and fight Flyway validation on boot.
+		if ensureSchema {
+			if err := pgadapter.EnsureSchema(ctx, dsn); err != nil {
+				t.Fatalf("side %s schema: %v", name, err)
+			}
+		}
 		if err := ResetDB(ctx, dsn); err != nil {
 			t.Fatalf("side %s reset: %v", name, err)
 		}
@@ -191,7 +204,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 		"go":   {Name: "go", BaseURL: "http://127.0.0.1:18084", DSN: goDSN, APIKey: apiKey},
 	}, apiKey)
 
-	java := runOne("java", "http://127.0.0.1:18083", 18093, javaDSN,
+	java := runOne("java", "http://127.0.0.1:18083", 18093, javaDSN, false,
 		func() (*Proc, error) {
 			return Launch(ctx, ProcSpec{
 				Name: "java", Bin: "java",
@@ -209,7 +222,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 			})
 		})
 
-	goRes := runOne("go", "http://127.0.0.1:18084", 18094, env["EQUALIX_GO_DSN"], func() (*Proc, error) {
+	goRes := runOne("go", "http://127.0.0.1:18084", 18094, env["EQUALIX_GO_DSN"], true, func() (*Proc, error) {
 		return Launch(ctx, ProcSpec{
 			Name: "go", Bin: env["EQUALIX_GO_BIN"],
 			Args: []string{
@@ -286,6 +299,7 @@ func TestLiveJavaVsGo(t *testing.T) {
 		JavaDSN: redact(env["EQUALIX_JAVA_JDBC"]), GoDSN: redact(env["EQUALIX_GO_DSN"]),
 		JavaPort: 18083, GoPort: 18084, Stub: DefaultLatency(),
 		MarkerJava: java.Marker, MarkerGo: goRes.Marker,
+		SubmitPace: SubmitPacePerSec(),
 	}
 	pace := SubmitPacePerSec()
 	paceStr := "burst"
@@ -392,6 +406,11 @@ func TestLiveGoVsGo(t *testing.T) {
 			t.Fatalf("side %s: %v", name, err)
 		}
 		defer proc.Stop()
+		// Go side: self-heal schema on fresh databases (see runOne —
+		// same ensureSchema rationale; GvG legs are always Go).
+		if err := pgadapter.EnsureSchema(ctx, dsn); err != nil {
+			t.Fatalf("side %s schema: %v", name, err)
+		}
 		if err := ResetDB(ctx, dsn); err != nil {
 			t.Fatalf("side %s reset: %v", name, err)
 		}
@@ -472,6 +491,7 @@ func TestLiveGoVsGo(t *testing.T) {
 		JavaDSN: redact(goDSN), GoDSN: redact(dsn2),
 		JavaPort: 18085, GoPort: 18086, Stub: DefaultLatency(),
 		MarkerJava: g1.Marker, MarkerGo: g2.Marker,
+		SubmitPace: SubmitPacePerSec(),
 	}
 	method := "EQLX-5 control [" + warmCfg.Class() + "]: go-vs-go (go1 in java_* slots) " + wl + " fixed-100ms stub, " + func() string {
 		if p := SubmitPacePerSec(); p > 0 {

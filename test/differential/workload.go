@@ -25,6 +25,11 @@ type Task struct {
 	CreatedAtOffsetMs int64 `json:"created_at_offset_ms"`
 	// SubmittedAtOffsetMs is the driver's submit schedule, relative to
 	// run start. Must be >= 0 and non-decreasing down the file.
+	// VESTIGIAL FOR THE LIVE PATH: RunSide submits ASAP (or at
+	// EQUALIX_SUBMIT_PACE) and never reads this field — validated on
+	// load, ignored at runtime. Anyone reading a workload file and
+	// assuming it controls timing is misled; pacing lives in the
+	// invocation (env), timing truth in results.json:resolved.
 	SubmittedAtOffsetMs int64 `json:"submitted_at_offset_ms"`
 	// PayloadBytes fixes the opaque payload size.
 	PayloadBytes int `json:"payload_bytes"`

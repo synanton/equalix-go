@@ -133,6 +133,24 @@ func TestMigrateConcurrentSerializes(t *testing.T) {
 	}
 }
 
+// TestEnsureSchemaHealsFreshDB is the harness path: a database with
+// roles but no tables (compose pg-init output) gains the schema on
+// first call and no-ops after. This is what runOne/runGo invoke before
+// ResetDB on Go sides — residue clearing assumes tables, schema
+// creation precedes it.
+func TestEnsureSchemaHealsFreshDB(t *testing.T) {
+	dsn := freshDB(t, "mtest_ensure")
+	if err := adapter.EnsureSchema(ctx, dsn); err != nil {
+		t.Fatal(err)
+	}
+	if !tableExists(t, dsn, "tasks") {
+		t.Fatal("tasks missing after EnsureSchema")
+	}
+	if err := adapter.EnsureSchema(ctx, dsn); err != nil {
+		t.Fatalf("second EnsureSchema errored: %v", err)
+	}
+}
+
 // TestMigrateBadDSNFailsFast pins the fail-fast contract: an unreachable
 // database errors before anything binds or serves — no partial startup.
 func TestMigrateBadDSNFailsFast(t *testing.T) {

@@ -36,7 +36,9 @@ type RunConfig struct {
 }
 
 // Resolved is the artifact block answering "did both sides run against
-// the intended config?" DSN passwords are redacted.
+// the intended config?" DSN passwords are redacted. Every pacing input
+// lives here as data (not just methodology prose) so a run re-derives
+// from the artifact alone.
 type Resolved struct {
 	JavaDSN     string        `json:"java_dsn"`
 	GoDSN       string        `json:"go_dsn"`
@@ -48,6 +50,8 @@ type Resolved struct {
 	MarkerJava  time.Time     `json:"marker_java"`
 	MarkerGo    time.Time     `json:"marker_go"`
 	WorkloadSHA string        `json:"workload_sha"`
+	// SubmitPacePerSec is the measurement ingest pace (0 = ASAP burst).
+	SubmitPace float64 `json:"submit_pace_per_sec"`
 }
 
 // Validate rejects incoherent runs before anything starts: missing files,

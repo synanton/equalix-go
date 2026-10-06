@@ -254,9 +254,15 @@ func waitQuiesced(ctx context.Context, dsn string, stub *Stub, timeout time.Dura
 // fields are vestigial for the live path: RunSide never honored them).
 // Fixed-rate residuals (promotion-deadline sweep) set an explicit pace;
 // the value travels into the methodology string, never silently.
+// Absurd paces (>1000/s) clamp to 1000: time.NewTicker panics on
+// non-positive durations, and that panic would read as a harness bug
+// instead of a typo'd env var.
 func SubmitPacePerSec() float64 {
 	if v := os.Getenv("EQUALIX_SUBMIT_PACE"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			if f > 1000 {
+				return 1000
+			}
 			return f
 		}
 	}
