@@ -67,6 +67,7 @@ It targets asynchronous inference workloads where many tenants share LLM/GPU cap
 - **Count-Min Sketch** for O(1) approximate in-flight counting (~2.6 MB at `width=65536`, `depth=5`)
 - **Adaptive RPS controller** with latency EMA, error-rate brake, and dead-band dampener
 - **Watchdog reconciliation** (every 5 min) to repair `client_counts` and CMS drift against the authoritative task table
+- **Shared CMS via Redis** — cross-instance in-flight view (EQLX-8 evidence: fleet ±6, no double-dispatch)
 - **Hierarchical fairness** — `flat` mode validated (EQLX-5 warm-class); `hierarchical` path lands in EQLX-9 behind the existing `fairness_mode` flag (default `flat`, frozen behavior)
 - Per-key hard quotas, anti-starvation aging plus `max-queued-time-ms` promotion
 - **Sequential execution mode** with per-key ordering, block recovery, and result passthrough
