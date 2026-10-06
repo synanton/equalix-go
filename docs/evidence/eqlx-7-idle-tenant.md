@@ -31,6 +31,16 @@ implementations: four-way agreement within ±3 tasks. Promoted counts
 (108/24/25/25) are the known cold-contention asymmetry, not idle
 behavior — the idle observable is the window, and it matches.
 
+Clamp-absent counterfactual (what falsifies the claim): without
+`max(stale_finish, V)`, A's first returning task would tag at
+stale_finish + quantum/weight ≈ 40k + 1000/1.0 ≈ 41k (Go numbers),
+below the then-current V ≈ 109k — so A would dispatch on nearly
+every tick until its tags caught up, producing a first-window share
+≫10% (bounded by the 7:1 weight ratio toward ~70% in early windows),
+not the observed 10%. The observed 10% rules this out; without this
+sentence the doc would report a positive result without excluding
+the alternative.
+
 Clamp-exercise verification (not assumed): Go system V at the return
 boundary ≈109k vs A's stale finish ≤ ~40k (phase-0 tags at V ≤ 36k +
 quantum); Java V ≈ 51k vs stale ≤ ~16k. V advanced 3–10× past stale
@@ -46,10 +56,13 @@ dominating the return window. It shows 10%.
 | go1/go2 (GvG) | {a:9 b:6 c:20} / {a:9 b:6 c:20} | — |
 
 Byte-identical across all four sides. RPS never leaves the floor
-(1.8–2.0), promotions 0 everywhere, all tasks terminal. This is the
-floor control doing its job — and, read honestly, a vacuous parity
-below it: with no contention there is no clamp question, only
-arrival-order replay. It never stands without its above-floor
+(1.1→1.8–2.0 on every side — pinned, never zero), all 150 tasks
+terminal (DB-verified SUCCEEDED on the JvG pair), promotions 0
+everywhere. The floor assertions matter: this run proves the floor
+dispatches (nonzero count), holds (never drops to zero), and
+terminates everything — without them it would be vacuous on both
+axes (no clamp question AND no floor evidence), i.e. a null result
+rather than a control. It never stands without its above-floor
 sibling (which is why the two ship as one residual).
 
 ## Warm negative control (JvG, return @80s, RPS 100 both sides)
