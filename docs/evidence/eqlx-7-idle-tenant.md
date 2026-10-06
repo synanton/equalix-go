@@ -33,19 +33,24 @@ behavior — the idle observable is the window, and it matches.
 
 Clamp-absent counterfactual (what falsifies the claim): without
 `max(stale_finish, V)`, A's first returning task would tag at
-stale_finish + quantum/weight ≈ 40k + 1000/1.0 ≈ 41k (Go numbers),
-below the then-current V ≈ 109k — so A would dispatch on nearly
+stale_finish + quantum/weight = 37500 + 1000/1.0 = 38500 (Go numbers,
+stale bound computed above),
+below the then-current V = 109571 — so A would dispatch on nearly
 every tick until its tags caught up, producing a first-window share
 ≫10% (bounded by the 7:1 weight ratio toward ~70% in early windows),
 not the observed 10%. The observed 10% rules this out; without this
 sentence the doc would report a positive result without excluding
 the alternative.
 
-Clamp-exercise verification (not assumed): Go system V at the return
-boundary ≈109k vs A's stale finish ≤ ~40k (phase-0 tags at V ≤ 36k +
-quantum); Java V ≈ 51k vs stale ≤ ~16k. V advanced 3–10× past stale
-finishes on both sides — a missing clamp would have shown A
-dominating the return window. It shows 10%.
+Clamp-exercise verification (not assumed — exact trace values): Go
+system V at the return boundary 109571 (sample 11:25:01,
+marker+25.3s) vs A's stale finish at most 37500 (V=36500 when A's
+30th phase-0 task tagged at 11:24:41, + quantum/1.0); Java V about
+51000 (interpolated 11:22:53 between the 47714 and 56500 samples)
+vs stale at most 16000 (V about 15000 interpolated at phase-0 end
+11:22:33 + quantum). Margins 2.9x / 3.2x — the clamp wasn't
+borderline, it was forced. All values checkable against
+`results.json:traces.*.v`.
 
 ## Below floor (cold, return @26s, RPS pinned ~2)
 
@@ -55,10 +60,13 @@ dominating the return window. It shows 10%.
 | go (JvG) | {a:9 b:6 c:20} | — |
 | go1/go2 (GvG) | {a:9 b:6 c:20} / {a:9 b:6 c:20} | — |
 
-Byte-identical across all four sides. RPS never leaves the floor
-(1.1→1.8–2.0 on every side — pinned, never zero), all 150 tasks
+Byte-identical across all four sides. Floor assertion: controller
+RPS ∈ [1.0, 2.0] for the duration (never exceeded 2× the 1.0 floor;
+observed maxima 1.80–1.98 across the four sides), all 150 tasks
 terminal (DB-verified SUCCEEDED on the JvG pair), promotions 0
-everywhere. The floor assertions matter: this run proves the floor
+everywhere. The tolerance is the falsification condition — a run
+drifting to 2.5 could not be reported as "stayed at floor" without
+tripping it. The floor assertions matter: this run proves the floor
 dispatches (nonzero count), holds (never drops to zero), and
 terminates everything — without them it would be vacuous on both
 axes (no clamp question AND no floor evidence), i.e. a null result

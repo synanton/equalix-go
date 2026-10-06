@@ -1,0 +1,112 @@
+{
+  "width": 65536,
+  "depth": 5,
+  "seed": 42,
+  "cases": [
+    {
+      "cardinality": 100,
+      "distribution": "uniform",
+      "total": 1000000,
+      "keys_covered": 100,
+      "keys_uncovered": 0,
+      "p50_rel": 0,
+      "p99_rel": 0,
+      "max_rel": 0,
+      "mean_abs": 0,
+      "max_abs": 0,
+      "underestimates": 0
+    },
+    {
+      "cardinality": 100,
+      "distribution": "zipfian-s1.5",
+      "total": 1000000,
+      "keys_covered": 100,
+      "keys_uncovered": 0,
+      "p50_rel": 0,
+      "p99_rel": 0,
+      "max_rel": 0,
+      "mean_abs": 0,
+      "max_abs": 0,
+      "underestimates": 0
+    },
+    {
+      "cardinality": 1000,
+      "distribution": "uniform",
+      "total": 1000000,
+      "keys_covered": 1000,
+      "keys_uncovered": 0,
+      "p50_rel": 0,
+      "p99_rel": 0,
+      "max_rel": 0,
+      "mean_abs": 0,
+      "max_abs": 0,
+      "underestimates": 0
+    },
+    {
+      "cardinality": 1000,
+      "distribution": "zipfian-s1.5",
+      "total": 1000000,
+      "keys_covered": 1000,
+      "keys_uncovered": 0,
+      "p50_rel": 0,
+      "p99_rel": 0,
+      "max_rel": 0,
+      "mean_abs": 0,
+      "max_abs": 0,
+      "underestimates": 0
+    },
+    {
+      "cardinality": 10000,
+      "distribution": "uniform",
+      "total": 1000000,
+      "keys_covered": 10000,
+      "keys_uncovered": 0,
+      "p50_rel": 0,
+      "p99_rel": 0,
+      "max_rel": 0,
+      "mean_abs": 0,
+      "max_abs": 0,
+      "underestimates": 0
+    },
+    {
+      "cardinality": 10000,
+      "distribution": "zipfian-s1.5",
+      "total": 1000000,
+      "keys_covered": 6862,
+      "keys_uncovered": 3138,
+      "p50_rel": 0,
+      "p99_rel": 0,
+      "max_rel": 0,
+      "mean_abs": 0,
+      "max_abs": 0,
+      "underestimates": 0
+    },
+    {
+      "cardinality": 100000,
+      "distribution": "uniform",
+      "total": 1000000,
+      "keys_covered": 100000,
+      "keys_uncovered": 0,
+      "p50_rel": 0,
+      "p99_rel": 2,
+      "max_rel": 3,
+      "mean_abs": 3.1036,
+      "max_abs": 30,
+      "underestimates": 0
+    },
+    {
+      "cardinality": 100000,
+      "distribution": "zipfian-s1.5",
+      "total": 1000000,
+      "keys_covered": 11694,
+      "keys_uncovered": 88306,
+      "p50_rel": 0,
+      "p99_rel": 0,
+      "max_rel": 0.5,
+      "mean_abs": 0.00008551393877201984,
+      "max_abs": 1,
+      "underestimates": 0
+    }
+  ],
+  "theory": "one-sided overestimate; abs error \u003c= eps*total w.h.p., eps = 2/65536"
+}
