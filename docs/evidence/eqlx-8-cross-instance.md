@@ -30,14 +30,38 @@ Five identical runs (xx1–xx5).
 | xx5 | {2,1,3} | {2,1,3} | FAIL | PASS |
 
 Shapes vary run to run but sit symmetric across both windows within
-each run (suspected startup phase-lock between the racers —
-persistent within a run, random across runs; hypothesis, not
-established). Max observed deviation 5 → bound ±6 (max + 1), N=5 to
+each run. Max observed deviation 5 → bound ±6 (max + 1), N=5 to
 date, re-derive if the fleet grows beyond two racers. This follows
-the EQLX-5 precedent exactly (bound from control agreement); the
-single-instance ±2 does not transfer because two racers provably
-widen interleaving variance, and gating a fleet on a
-single-process bound would fail every fleet run on noise.
+the EQLX-5 precedent exactly (bound from control agreement) — with
+one difference that IS the finding: single-instance warm-class
+holds ±2, cross-instance holds ±6, a 3× widening stated plainly
+rather than buried as "empirically derived."
+
+Likely mechanism (not proven): the post-commit CMS window operating
+at two-instance tick interleave. A commits a dispatch and adds to
+Redis post-commit; B's next tick reads Redis before the add lands
+and sees stale in-flight. Single-instance this window exists only
+at crash boundaries; shared across two ticking instances it is a
+normal-operation race. Consequence, stated without hedging:
+horizontal scaling preserves weighted fairness within a wider
+envelope, not at single-instance quality. If the README's scaling
+claim ever reads as "same fairness at any scale," that reading is
+wrong as of this evidence — qualify it.
+
+Phase-lock status: leading hypothesis for the within-run symmetry
+(both ticks at fixed cadence, no jitter — a fixed phase offset
+established at startup would bias every window identically),
+UNTESTED. Discriminating experiment (not run): ±10–20% tick jitter,
+N=5 repeat — bound tightening toward ±2–3 confirms phase-lock (and
+jitter becomes the mitigation); unchanged bound rules it out and the
+finding needs another attribution. Until then the bound is
+empirical, not mechanism-derived, and this paragraph says so.
+
+Control shape (so the derivation is checkable): Go-vs-Go
+cross-instance — same two-instance topology, same workload, no Java
+asymmetry. NOT single-instance Go and NOT single-instance Go-vs-Go:
+different topologies, different variance, wrong reference
+distributions. The bound measures this fleet's own noise floor.
 
 ## Reading
 

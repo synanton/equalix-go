@@ -24,6 +24,19 @@ services:
       timeout: 2s
       retries: 30
 
+  redis:
+    # Shared-CMS backend for cross-instance runs (EQLX-8). Declarative
+    # like postgres above: no scratch containers, no manual docker run.
+    # EQUALIX_REDIS_ADDR=127.0.0.1:6379 in live runs.
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
   # Databases exist (not assumed) from the pg-init mount above: cmp
   # role plus empty equalix_java/go/go2. Schema is applied by owners,
   # never by hand: Java Flyway on boot; the harness ensureSchema
