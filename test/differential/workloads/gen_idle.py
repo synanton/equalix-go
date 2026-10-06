@@ -78,13 +78,20 @@ def write(path, rows):
     print(path, len(rows), dict(counts), "a-idle-gap-ms:", gap)
 
 
-# Above floor: phase0 {a:60,b:70,c:70} @50ms (0-10s); phase1
-# {b:260,c:1140} @50ms (10-80s, A idle ~70s); phase2
-# {a:140,b:70,c:190} @50ms (80-100s). Totals a/b/c = 200/400/1400.
+# Above floor, COLD, early return: phase0 {a:30,b:35,c:35} @50ms
+# (0-5s, A active, establishes finishes); phase1 {b:85,c:315} @50ms
+# (5-25s, A idle ~20s, V advances past A's stale finish — verified
+# post-hoc from trace V series); phase2 {a:170,b:280,c:950} @25ms
+# (25-60s, A returns into a cold ramp at RPS ~3-6 with arrival 40/s —
+# deep contention, tag position decides). Totals a/b/c = 200/400/1400.
+# NOTE: an earlier warm variant (return at 80s, RPS 100 both sides)
+# produced byte-identical file-mix replay on both sides — uncontended
+# arrival order answers nothing about the clamp. Do not "simplify"
+# back to warm.
 above = build("idle", [
-    ({"a": 60, "b": 70, "c": 70}, 0, 50),
-    ({"b": 260, "c": 1140}, 10000, 50),
-    ({"a": 140, "b": 70, "c": 190}, 80000, 50),
+    ({"a": 30, "b": 35, "c": 35}, 0, 50),
+    ({"b": 85, "c": 315}, 5000, 50),
+    ({"a": 170, "b": 280, "c": 950}, 25000, 25),
 ])
 write("w-idle.jsonl", above)
 
