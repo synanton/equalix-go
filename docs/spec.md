@@ -273,6 +273,24 @@ Per tick (`HierarchicalDispatchPlanner`):
 
 Aging is ignored in hierarchical mode (warning logged); `max-queued-time-ms` promotion still applies. CMS is wrapped in `HierarchicalCmsProvider`, counting every internal node (`acme/`) and root (`""`) so per-layer pressure and global total come from the sketch. Metrics: `equalix.hierarchy.dispatches{layer, node}` up to `metrics-depth` (default 1).
 
+#### Charge (vocabulary for the hierarchy path — new in EQLX-9, absent from the flat model)
+
+Charge is the per-node accumulator tracking pending virtual-time
+advance attributable to descendants not yet applied to the node's
+own V. At dispatch, every node on the dispatched task's path
+(except root) advances `τ += q/w`
+(`HierarchicalSelector.charge`, selector lines 162–174:
+`node.virtualTime += quantum / node.weight` for `node != root`);
+at persist, the node's V is set to `GREATEST(current_V, floor) +
+delta` (`HierarchyNodeJpaRepository.chargeVirtualTime`, adapter
+lines 14–19). Consequence: sibling subtrees never see stale V from
+each other's in-flight charges — each level reads max-persisted
+state, never a partially-applied sibling write. Related but not
+identical to flat-path in-flight pressure (`p·F̂/w`, a scheduling
+input computed from CMS at selection time): pressure biases WHO is
+picked next, charge records WHAT service was received for future
+picks. Conflating them misreads both halves of the algorithm.
+
 Sources: `domain/service/HierarchicalDispatchPlanner.java`, `domain/service/HierarchicalSelector.java`, `adapter/out/cms/HierarchicalCmsProvider.java`, `docs/design.md` §9.5.
 
 ### 6.2 Per-tenant quotas
