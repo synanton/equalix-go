@@ -82,10 +82,20 @@ empty-response drops on one stack read as scheduler divergence if unattributed
 (observed: JDK pooled keep-alive reuse vs a Python stub; Reactor: zero against
 the same stub). All sides are HTTP/1.1-only against the stub (verified in code:
 Go bare `http.Client`, Reactor with no protocol config, JDK pinned) — no
-negotiated-version skew. Rule: stuck-send counts are a client-stack diagnostic,
+negotiated-version skew. Pinned-vs-default split, recorded so a future upgrade
+that changes a default is checkable: Micronaut pinned explicitly; Go and Spring
+at HTTP/1.1 by default. If a Reactor or `net/http` upgrade ever negotiates
+otherwise, this is the side to re-verify — no code change will announce it. Rule: stuck-send counts are a client-stack diagnostic,
 reported per side with the stack named, never gated, never averaged away. Direct
 inheritor of the §13 attribution NOTE; that NOTE is about attribution, this entry
 about parameters of the run.
+
+Executor payload shape. The Go implementation sends empty executor bodies
+(payload bytes are adapter-layer, not domain-layer, per DECISION-2). The stub
+accepts empty bodies; the protocol contract carries no payload requirement.
+Java's executor and Micronaut's send the non-empty binary envelope. This
+difference does not affect dispatch semantics and is not gated — recorded so
+the next stricter stub reads it as documented protocol shape, not a Go bug.
 
 ## Workload provenance pinning
 
