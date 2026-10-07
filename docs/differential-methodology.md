@@ -5,6 +5,10 @@ The differential harness (`test/differential`, EQLX-5) was built pairwise
 three invocations, one shared workload, results assembled into one matrix in the
 evidence doc — never one giant three-sided run.
 
+Inherits from spec §13: the attribution NOTE (harness-first tracing rule) and the
+commit-race NOTE (stub-latency load shaping). This doc is run parameters; those
+NOTEs are traps. Readers setting up runs start here; readers mid-debug start there.
+
 ## Provenance
 
 The three columns do not prove the same thing:
@@ -31,6 +35,14 @@ parameter change — new sides, same comparison code):
 "Same workload" is pinned, not asserted (see provenance pinning). Order effects
 are handled by alternating side order across runs where the harness supports it;
 where it does not, order is recorded with the run.
+
+## Evidence location convention
+
+All differential evidence lives here, in `equalix-go/docs/evidence/` — including
+the Micronaut-involved pairs. The harness is family infrastructure and its
+evidence directory is where it publishes; `equalix-micronaut` cites by
+repo + path + commit, never by copy. No second copies, no sync discipline, no
+cross-repo fragility beyond a commit-pinned reference.
 
 ## Gates per pair
 
