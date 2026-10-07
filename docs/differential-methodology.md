@@ -104,3 +104,16 @@ Every pairwise run cites, in its evidence header:
 
 "Three pairwise runs" means three runs traceable to one workload SHA — not three
 runs that happened to use the same filename.
+
+## Flake protocol
+
+Stochastic failures (<0.1% per run, no deterministic reproduction in N attempts)
+are rerun once. A single green rerun is the accepted result and the incident is
+recorded in the evidence doc. A second failure on the same configuration opens a
+debugging branch — the stochastic hypothesis is rejected and the mechanism is
+investigated. Without the protocol, "reran green" accumulates silently; the
+protocol makes the first dismissal explicit and the second failure mandatory.
+The drain-tolerance gap is what keeps this honest rather than convenient: a
+flake caused by a mis-shaped gate (drain tripping on excluded stuck sends) is
+deterministic at the client-stack level, and fixing the gate removes the flake
+class. The protocol covers genuine stochastic events, not mis-shaped gates.

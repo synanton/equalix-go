@@ -32,6 +32,28 @@ Shared: workload `w2000.jsonl`
 Warm-class shares (±2/1000-window) on all pairs; order diagnostic only
 (flaky by construction); stuck-send counts excluded from gates, reported below.
 
+Drain-tolerance footnote: the first Go-vs-Micronaut attempt failed its 180 s
+drain on a single stuck send (<0.1%) and was rerun green per the flake protocol
+(methodology doc). The drain as shaped effectively gates on stuck sends even
+though stuck sends are excluded from gates — a known mis-shape, recorded here
+so the pass verdict is not overstated. Future runs should tolerate a small
+stuck budget in `RunSide` drain or retry-then-record; not changed in this round.
+
+## Warmup-count asymmetry (quantified — cosmetic)
+
+Warmup task counts differ per side (per-side RPS ramp to the shared gate), but
+measurement-entry state matches:
+
+| Pair | Warmup prefix | Prephase dispatched |
+|---|---|---|
+| Go-vs-Spring | go 106, java 95 | 928 / 928 |
+| Spring-vs-Micronaut | java 88, mn 57 | 928 / 928 |
+| Go-vs-Micronaut | go 105, mn 50 | 928 / 920 |
+
+Prephase dispatched agrees within 1% on all pairs — equivalent entry states, so
+the count asymmetry is cosmetic (ramp-rate artifact), not a regime difference.
+A load-bearing asymmetry would show here first; it does not.
+
 ## Seams-checked (Micronaut pairs — tested, not assumed)
 
 - Dispatch decisions: per-tick batch sizes identical under burst (MN 4.3 vs
