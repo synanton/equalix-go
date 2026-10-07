@@ -131,7 +131,6 @@ func runPair(t *testing.T, ctx context.Context, apiKey string, workload []Task,
 		}
 		func() {
 			defer proc.Stop()
-			defer stub.Close(ctx)
 			if leg.ensureSchema {
 				if err := pgadapter.EnsureSchema(ctx, leg.dsn); err != nil {
 					t.Fatalf("side %s schema: %v", leg.name, err)
