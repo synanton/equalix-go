@@ -647,11 +647,13 @@ type Result struct {
 // to be a readability cliff, so the published-artifact fields travel as
 // one struct. Callers fill what their leg measures.
 type Artifact struct {
-	Dir         string
-	Method      string
-	Resolved    *Resolved
-	JavaSHA     string
-	GoSHA       string
+	Dir      string
+	Method   string
+	Resolved *Resolved
+	JavaSHA  string
+	GoSHA    string
+	// Micronaut side (three-way runs only; empty otherwise).
+	MnSHA       string
 	Calibration []string
 	Traces      map[string][]TracePoint
 	Fetch       map[string]fetchStat
@@ -678,5 +680,8 @@ func WriteResult(a Artifact) error {
 		return err
 	}
 	doc := "# Methodology\n\n" + a.Method + "\n\nJava: " + a.JavaSHA + "\nGo: " + a.GoSHA + "\n"
+	if a.MnSHA != "" {
+		doc += "Micronaut: " + a.MnSHA + "\n"
+	}
 	return os.WriteFile(filepath.Join(a.Dir, "methodology.md"), []byte(doc), 0o600)
 }

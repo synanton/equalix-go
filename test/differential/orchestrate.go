@@ -40,15 +40,20 @@ type RunConfig struct {
 // lives here as data (not just methodology prose) so a run re-derives
 // from the artifact alone.
 type Resolved struct {
-	JavaDSN     string        `json:"java_dsn"`
-	GoDSN       string        `json:"go_dsn"`
-	JavaPort    int           `json:"java_port"`
-	GoPort      int           `json:"go_port"`
-	JavaPID     int           `json:"java_pid"`
-	GoPID       int           `json:"go_pid"`
+	JavaDSN  string `json:"java_dsn"`
+	GoDSN    string `json:"go_dsn"`
+	JavaPort int    `json:"java_port"`
+	GoPort   int    `json:"go_port"`
+	JavaPID  int    `json:"java_pid"`
+	GoPID    int    `json:"go_pid"`
+	// Micronaut side (three-way runs only; omitted otherwise).
+	MnDSN       string        `json:"mn_dsn,omitempty"`
+	MnPort      int           `json:"mn_port,omitempty"`
+	MnPID       int           `json:"mn_pid,omitempty"`
 	Stub        LatencyConfig `json:"stub"`
 	MarkerJava  time.Time     `json:"marker_java"`
 	MarkerGo    time.Time     `json:"marker_go"`
+	MarkerMn    time.Time     `json:"marker_mn,omitempty"`
 	WorkloadSHA string        `json:"workload_sha"`
 	// SubmitPacePerSec is the measurement ingest pace (0 = ASAP burst).
 	SubmitPace float64 `json:"submit_pace_per_sec"`
