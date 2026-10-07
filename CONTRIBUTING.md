@@ -115,6 +115,13 @@ docs(spec): clarify CMS decay semantics
 chore: initialize module and repo skeleton
 ```
 
+Commit from status-verified-clean trees: run `git status` before staging and
+stage explicit paths. Never `git add -A` without first confirming the status
+shows only intended changes — unrelated working-tree state (other repos'
+artifacts, scratch files, stale index entries) must stay out of the commit.
+Five near-misses of unrelated files riding into docs commits is the reason
+this rule exists.
+
 ---
 
 ## Testing Requirements

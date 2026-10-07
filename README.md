@@ -111,7 +111,13 @@ Measured fairness in Java, with tenants at weights 1 : 2 : 7 continuously backlo
 ## Why Go
 
 - **Single static binary** — millisecond startup, tiny container images, no JVM
-- **Memory efficiency** — typically 4–6× lower RSS than equivalent JVM services in containers
+- **Memory efficiency** — lower RSS than equivalent JVM services in containers;
+  see the [Equalix family comparison](https://github.com/synanton/.github/blob/main/profile/experiments/equalix-family-comparison.md)
+  for measured ratios (≈50× cold-idle, ≈22× under load — the historical 4–6×
+  figure was never measured against a stated definition and is superseded).
+  See the write-path divergence section there for one characterized difference
+  from the oracle (unconditional version-bump saves livelock under sustained
+  deep backlog where the oracle's dirty-checking no-ops).
 - **Concurrency model** — goroutines and channels map naturally to the dispatcher, watchdog, RPS controller, and priority calculator jobs
 - **Idiomatic dependency stack** — `pgx`, `chi`, `prometheus/client_golang`, `go-redis`
 
@@ -405,6 +411,16 @@ Contributions welcome. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) before o
 5. Submit a pull request (merging is manual — a maintainer merges after review)
 
 ---
+
+## Family
+
+Equalix has three implementations of the same scheduling semantics:
+Spring Boot ([equalix](https://github.com/synanton/equalix), the reference),
+Go ([equalix-go](https://github.com/synanton/equalix-go)), and Micronaut
+([equalix-micronaut](https://github.com/synanton/equalix-micronaut)).
+
+Startup, footprint and runtime characterization across all three:
+[**Equalix family comparison →**](https://github.com/synanton/.github/blob/main/profile/experiments/equalix-family-comparison.md).
 
 ## License
 

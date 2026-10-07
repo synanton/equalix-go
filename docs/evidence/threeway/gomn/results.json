@@ -1,0 +1,1054 @@
+{
+  "resolved": {
+    "java_dsn": "",
+    "go_dsn": "postgres://cmp@localhost:5433/equalix_go?sslmode=disable",
+    "java_port": 0,
+    "go_port": 18084,
+    "java_pid": 0,
+    "go_pid": 0,
+    "mn_dsn": "unparseable-dsn",
+    "mn_port": 18101,
+    "stub": {
+      "Shape": "fixed",
+      "BaseMs": 100,
+      "SpreadMs": 0,
+      "Sigma": 0,
+      "Seed": 42
+    },
+    "marker_java": "0001-01-01T00:00:00Z",
+    "marker_go": "2026-10-07T12:06:41.416093Z",
+    "marker_mn": "2026-10-07T12:09:31.720551Z",
+    "workload_sha": "6874118749cab5bf4e8e5899f77800dae38e6017eb183580095d0a7e17e59546",
+    "submit_pace_per_sec": 0
+  },
+  "methodology": "EQLX-7 differential [warm]: w2000.jsonl fixed-100ms stub, burst",
+  "traces": {
+    "go": [
+      {
+        "at": "2026-10-07T15:04:44.152082969+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704214.2857143106
+      },
+      {
+        "at": "2026-10-07T15:04:49.217703695+03:00",
+        "rps": 1.1025,
+        "total_dispatched_including_prephase": 35,
+        "promoted": 0,
+        "v": 19571.428571428572
+      },
+      {
+        "at": "2026-10-07T15:04:54.217660782+03:00",
+        "rps": 1.2155062500000002,
+        "total_dispatched_including_prephase": 75,
+        "promoted": 0,
+        "v": 41071.42857142857
+      },
+      {
+        "at": "2026-10-07T15:04:59.217949527+03:00",
+        "rps": 1.4071004226562505,
+        "total_dispatched_including_prephase": 115,
+        "promoted": 0,
+        "v": 63428.57142857146
+      },
+      {
+        "at": "2026-10-07T15:05:04.217293658+03:00",
+        "rps": 1.5513282159785162,
+        "total_dispatched_including_prephase": 155,
+        "promoted": 0,
+        "v": 85285.71428571435
+      },
+      {
+        "at": "2026-10-07T15:05:09.217586297+03:00",
+        "rps": 1.79585632602213,
+        "total_dispatched_including_prephase": 195,
+        "promoted": 0,
+        "v": 106785.71428571438
+      },
+      {
+        "at": "2026-10-07T15:05:14.217938866+03:00",
+        "rps": 1.9799315994393987,
+        "total_dispatched_including_prephase": 235,
+        "promoted": 0,
+        "v": 129142.85714285726
+      },
+      {
+        "at": "2026-10-07T15:05:19.217596037+03:00",
+        "rps": 2.1828745883819374,
+        "total_dispatched_including_prephase": 275,
+        "promoted": 0,
+        "v": 150999.99999999997
+      },
+      {
+        "at": "2026-10-07T15:05:24.217569385+03:00",
+        "rps": 2.5269501953756404,
+        "total_dispatched_including_prephase": 315,
+        "promoted": 0,
+        "v": 172357.14285714267
+      },
+      {
+        "at": "2026-10-07T15:05:29.217761849+03:00",
+        "rps": 2.785962590401644,
+        "total_dispatched_including_prephase": 355,
+        "promoted": 0,
+        "v": 194857.1428571425
+      },
+      {
+        "at": "2026-10-07T15:05:34.217379233+03:00",
+        "rps": 3.225099943713704,
+        "total_dispatched_including_prephase": 395,
+        "promoted": 0,
+        "v": 216714.2857142852
+      },
+      {
+        "at": "2026-10-07T15:05:39.217815085+03:00",
+        "rps": 3.5556726879443583,
+        "total_dispatched_including_prephase": 435,
+        "promoted": 0,
+        "v": 238214.285714285
+      },
+      {
+        "at": "2026-10-07T15:05:44.217752708+03:00",
+        "rps": 3.9201291384586554,
+        "total_dispatched_including_prephase": 475,
+        "promoted": 0,
+        "v": 260571.4285714277
+      },
+      {
+        "at": "2026-10-07T15:05:49.217299401+03:00",
+        "rps": 4.538039493908202,
+        "total_dispatched_including_prephase": 515,
+        "promoted": 0,
+        "v": 282428.5714285708
+      },
+      {
+        "at": "2026-10-07T15:05:54.217989421+03:00",
+        "rps": 5.003188542033793,
+        "total_dispatched_including_prephase": 555,
+        "promoted": 0,
+        "v": 303785.71428571385
+      },
+      {
+        "at": "2026-10-07T15:05:59.217164467+03:00",
+        "rps": 5.791816135971871,
+        "total_dispatched_including_prephase": 595,
+        "promoted": 0,
+        "v": 325285.7142857141
+      },
+      {
+        "at": "2026-10-07T15:06:04.217821174+03:00",
+        "rps": 6.385477289908988,
+        "total_dispatched_including_prephase": 635,
+        "promoted": 0,
+        "v": 348142.85714285716
+      },
+      {
+        "at": "2026-10-07T15:06:09.217455147+03:00",
+        "rps": 7.391988147730893,
+        "total_dispatched_including_prephase": 675,
+        "promoted": 0,
+        "v": 369642.8571428574
+      },
+      {
+        "at": "2026-10-07T15:06:14.217604838+03:00",
+        "rps": 8.149666932873311,
+        "total_dispatched_including_prephase": 715,
+        "promoted": 0,
+        "v": 392000.00000000047
+      },
+      {
+        "at": "2026-10-07T15:06:19.217457093+03:00",
+        "rps": 8.985007793492827,
+        "total_dispatched_including_prephase": 755,
+        "promoted": 0,
+        "v": 413857.14285714354
+      },
+      {
+        "at": "2026-10-07T15:06:24.217813859+03:00",
+        "rps": 10.401269646942135,
+        "total_dispatched_including_prephase": 795,
+        "promoted": 0,
+        "v": 435357.1428571438
+      },
+      {
+        "at": "2026-10-07T15:06:29.21704696+03:00",
+        "rps": 11.467399785753704,
+        "total_dispatched_including_prephase": 835,
+        "promoted": 0,
+        "v": 457714.28571428685
+      },
+      {
+        "at": "2026-10-07T15:06:34.217634968+03:00",
+        "rps": 13.274948676983135,
+        "total_dispatched_including_prephase": 875,
+        "promoted": 0,
+        "v": 479571.4285714299
+      },
+      {
+        "at": "2026-10-07T15:06:39.217338339+03:00",
+        "rps": 14.635630916373906,
+        "total_dispatched_including_prephase": 915,
+        "promoted": 0,
+        "v": 501071.42857143015
+      },
+      {
+        "at": "2026-10-07T15:06:44.21721954+03:00",
+        "rps": 16.942572239567344,
+        "total_dispatched_including_prephase": 1869,
+        "promoted": 0,
+        "v": 514142.8571428588
+      },
+      {
+        "at": "2026-10-07T15:06:49.217938469+03:00",
+        "rps": 18.679185894123,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 524142.8571428588
+      },
+      {
+        "at": "2026-10-07T15:06:54.217392521+03:00",
+        "rps": 20.593802448270605,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 538214.2857142908
+      },
+      {
+        "at": "2026-10-07T15:06:59.217736973+03:00",
+        "rps": 23.83990055917926,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 558071.428571436
+      },
+      {
+        "at": "2026-10-07T15:07:04.217684763+03:00",
+        "rps": 26.283490366495137,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 578214.2857142955
+      },
+      {
+        "at": "2026-10-07T15:07:09.217418918+03:00",
+        "rps": 30.42642553551394,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 598214.2857142978
+      },
+      {
+        "at": "2026-10-07T15:07:14.217723293+03:00",
+        "rps": 33.54513415290412,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 618214.2857143001
+      },
+      {
+        "at": "2026-10-07T15:07:19.217421758+03:00",
+        "rps": 38.83268592375563,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 638214.2857143024
+      },
+      {
+        "at": "2026-10-07T15:07:24.217009325+03:00",
+        "rps": 42.81303623094059,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 665357.1428571627
+      },
+      {
+        "at": "2026-10-07T15:07:29.217225433+03:00",
+        "rps": 49.561441066842605,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 695357.1428571662
+      },
+      {
+        "at": "2026-10-07T15:07:34.217700329+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:07:39.217359936+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:07:44.216959006+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:07:49.216929441+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:07:54.217523475+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:07:59.217417152+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:08:04.217581067+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:08:09.21786583+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:08:14.217837852+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:08:19.217117883+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:08:24.217769705+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:08:29.217953675+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:08:34.217333839+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:08:39.217233997+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:08:44.217018708+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:08:49.217794199+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:08:54.217235846+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:08:59.217277614+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:09:04.217189459+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:09:09.217780869+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:09:14.217394048+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:09:19.217942464+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:09:24.217861489+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:09:29.217531293+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:09:34.216945833+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:09:39.217366409+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:09:44.216995818+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:09:49.217741286+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:09:54.217178902+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:09:59.21789548+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:10:04.217310504+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:10:09.216977805+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:10:14.217859452+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:10:19.217153611+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:10:24.217235522+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      },
+      {
+        "at": "2026-10-07T15:10:29.217132972+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2928,
+        "promoted": 0,
+        "v": 708642.8571428821
+      }
+    ],
+    "micronaut": [
+      {
+        "at": "2026-10-07T15:04:44.152082969+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:04:49.217703695+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:04:54.217660782+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:04:59.217949527+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:05:04.217293658+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:05:09.217586297+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:05:14.217938866+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:05:19.217596037+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:05:24.217569385+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:05:29.217761849+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:05:34.217379233+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:05:39.217815085+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:05:44.217752708+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:05:49.217299401+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:05:54.217989421+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:05:59.217164467+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:06:04.217821174+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:06:09.217455147+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:06:14.217604838+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:06:19.217457093+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:06:24.217813859+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:06:29.21704696+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:06:34.217634968+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:06:39.217338339+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:06:44.21721954+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:06:49.217938469+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:06:54.217392521+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:06:59.217736973+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:07:04.217684763+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:07:09.217418918+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:07:14.217723293+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:07:19.217421758+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:07:24.217009325+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:07:29.217225433+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:07:34.217700329+03:00",
+        "rps": -1,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 704571.4285714534
+      },
+      {
+        "at": "2026-10-07T15:07:39.217359936+03:00",
+        "rps": 1.05,
+        "total_dispatched_including_prephase": 23,
+        "promoted": 0,
+        "v": 13000.000000000002
+      },
+      {
+        "at": "2026-10-07T15:07:44.216959006+03:00",
+        "rps": 1.2155062500000002,
+        "total_dispatched_including_prephase": 63,
+        "promoted": 0,
+        "v": 34499.99999999999
+      },
+      {
+        "at": "2026-10-07T15:07:49.216929441+03:00",
+        "rps": 1.3400956406250004,
+        "total_dispatched_including_prephase": 103,
+        "promoted": 0,
+        "v": 56857.14285714288
+      },
+      {
+        "at": "2026-10-07T15:07:54.217523475+03:00",
+        "rps": 1.5513282159785162,
+        "total_dispatched_including_prephase": 143,
+        "promoted": 0,
+        "v": 78714.28571428577
+      },
+      {
+        "at": "2026-10-07T15:07:59.217417152+03:00",
+        "rps": 1.7103393581163142,
+        "total_dispatched_including_prephase": 183,
+        "promoted": 0,
+        "v": 100214.2857142858
+      },
+      {
+        "at": "2026-10-07T15:08:04.217581067+03:00",
+        "rps": 1.8856491423232367,
+        "total_dispatched_including_prephase": 223,
+        "promoted": 0,
+        "v": 122571.42857142868
+      },
+      {
+        "at": "2026-10-07T15:08:09.21786583+03:00",
+        "rps": 2.1828745883819374,
+        "total_dispatched_including_prephase": 263,
+        "promoted": 0,
+        "v": 144428.57142857145
+      },
+      {
+        "at": "2026-10-07T15:08:14.217837852+03:00",
+        "rps": 2.406619233691086,
+        "total_dispatched_including_prephase": 304,
+        "promoted": 0,
+        "v": 165928.57142857127
+      },
+      {
+        "at": "2026-10-07T15:08:19.217117883+03:00",
+        "rps": 2.785962590401644,
+        "total_dispatched_including_prephase": 343,
+        "promoted": 0,
+        "v": 188285.71428571397
+      },
+      {
+        "at": "2026-10-07T15:08:24.217769705+03:00",
+        "rps": 3.071523755917813,
+        "total_dispatched_including_prephase": 383,
+        "promoted": 0,
+        "v": 210142.85714285666
+      },
+      {
+        "at": "2026-10-07T15:08:29.217953675+03:00",
+        "rps": 3.5556726879443583,
+        "total_dispatched_including_prephase": 424,
+        "promoted": 0,
+        "v": 231642.8571428565
+      },
+      {
+        "at": "2026-10-07T15:08:34.217333839+03:00",
+        "rps": 3.9201291384586554,
+        "total_dispatched_including_prephase": 463,
+        "promoted": 0,
+        "v": 253999.99999999919
+      },
+      {
+        "at": "2026-10-07T15:08:39.217233997+03:00",
+        "rps": 4.538039493908202,
+        "total_dispatched_including_prephase": 503,
+        "promoted": 0,
+        "v": 275857.14285714214
+      },
+      {
+        "at": "2026-10-07T15:08:44.217018708+03:00",
+        "rps": 5.003188542033793,
+        "total_dispatched_including_prephase": 544,
+        "promoted": 0,
+        "v": 297357.1428571424
+      },
+      {
+        "at": "2026-10-07T15:08:49.217794199+03:00",
+        "rps": 5.516015367592257,
+        "total_dispatched_including_prephase": 583,
+        "promoted": 0,
+        "v": 319714.28571428545
+      },
+      {
+        "at": "2026-10-07T15:08:54.217235846+03:00",
+        "rps": 6.385477289908988,
+        "total_dispatched_including_prephase": 623,
+        "promoted": 0,
+        "v": 341571.4285714285
+      },
+      {
+        "at": "2026-10-07T15:08:59.217277614+03:00",
+        "rps": 7.03998871212466,
+        "total_dispatched_including_prephase": 664,
+        "promoted": 0,
+        "v": 363071.42857142875
+      },
+      {
+        "at": "2026-10-07T15:09:04.217189459+03:00",
+        "rps": 8.149666932873311,
+        "total_dispatched_including_prephase": 703,
+        "promoted": 0,
+        "v": 385428.5714285718
+      },
+      {
+        "at": "2026-10-07T15:09:09.217780869+03:00",
+        "rps": 8.985007793492827,
+        "total_dispatched_including_prephase": 744,
+        "promoted": 0,
+        "v": 407428.57142857206
+      },
+      {
+        "at": "2026-10-07T15:09:14.217394048+03:00",
+        "rps": 9.905971092325842,
+        "total_dispatched_including_prephase": 783,
+        "promoted": 0,
+        "v": 428785.71428571513
+      },
+      {
+        "at": "2026-10-07T15:09:19.217942464+03:00",
+        "rps": 11.467399785753704,
+        "total_dispatched_including_prephase": 824,
+        "promoted": 0,
+        "v": 451142.8571428582
+      },
+      {
+        "at": "2026-10-07T15:09:24.217861489+03:00",
+        "rps": 12.64280826379346,
+        "total_dispatched_including_prephase": 863,
+        "promoted": 0,
+        "v": 473000.0000000013
+      },
+      {
+        "at": "2026-10-07T15:09:29.217531293+03:00",
+        "rps": 14.635630916373906,
+        "total_dispatched_including_prephase": 904,
+        "promoted": 0,
+        "v": 494500.0000000015
+      },
+      {
+        "at": "2026-10-07T15:09:34.216945833+03:00",
+        "rps": 16.135783085302233,
+        "total_dispatched_including_prephase": 2051,
+        "promoted": 0,
+        "v": 507214.2857142873
+      },
+      {
+        "at": "2026-10-07T15:09:39.217366409+03:00",
+        "rps": 18.679185894123,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 514357.14285714563
+      },
+      {
+        "at": "2026-10-07T15:09:44.216995818+03:00",
+        "rps": 20.593802448270605,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 523214.2857142873
+      },
+      {
+        "at": "2026-10-07T15:09:49.217741286+03:00",
+        "rps": 22.704667199218342,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 537214.2857142873
+      },
+      {
+        "at": "2026-10-07T15:09:54.217178902+03:00",
+        "rps": 26.283490366495137,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 551214.2857142928
+      },
+      {
+        "at": "2026-10-07T15:09:59.21789548+03:00",
+        "rps": 28.977548129060892,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 565928.5714285802
+      },
+      {
+        "at": "2026-10-07T15:10:04.217310504+03:00",
+        "rps": 33.54513415290412,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 581214.2857142963
+      },
+      {
+        "at": "2026-10-07T15:10:09.216977805+03:00",
+        "rps": 36.983510403576794,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 597714.2857142873
+      },
+      {
+        "at": "2026-10-07T15:10:14.217859452+03:00",
+        "rps": 42.81303623094059,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 618071.4285714434
+      },
+      {
+        "at": "2026-10-07T15:10:19.217153611+03:00",
+        "rps": 47.201372444612005,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 641357.1428571604
+      },
+      {
+        "at": "2026-10-07T15:10:24.217235522+03:00",
+        "rps": 54.641488776193974,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 665214.2857142873
+      },
+      {
+        "at": "2026-10-07T15:10:29.217132972+03:00",
+        "rps": 60.24224137575386,
+        "total_dispatched_including_prephase": 2920,
+        "promoted": 0,
+        "v": 691357.1428571662
+      }
+    ]
+  },
+  "calibration": [
+    "FirstQueued",
+    "InvertedWeights",
+    "Starving",
+    "QuotaIgnoring"
+  ],
+  "status_fetch": {
+    "go": {
+      "failed": 37,
+      "first": "differential: side go status: Get \"http://127.0.0.1:18084/api/v1/status\": dial tcp 127.0.0.1:18084: connect: connection refused",
+      "last": "differential: side go status: Get \"http://127.0.0.1:18084/api/v1/status\": dial tcp 127.0.0.1:18084: connect: connection refused"
+    },
+    "micronaut": {
+      "failed": 35,
+      "first": "differential: side micronaut status: Get \"http://127.0.0.1:18101/api/v1/status\": dial tcp 127.0.0.1:18101: connect: connection refused",
+      "last": "differential: side micronaut status: Get \"http://127.0.0.1:18101/api/v1/status\": dial tcp 127.0.0.1:18101: connect: connection refused"
+    }
+  },
+  "warmup": {
+    "go": 105,
+    "micronaut": 50
+  },
+  "prephase": {
+    "go": 928,
+    "micronaut": 920
+  },
+  "startup": {
+    "go": {
+      "spawn": "2026-10-07T15:04:44.152198544+03:00",
+      "ready": "2026-10-07T15:04:44.656047599+03:00",
+      "first_dispatch": "2026-10-07T15:06:41.545955792+03:00",
+      "spawn_to_ready_ms": 503,
+      "ready_to_first_dispatch_ms": 116889
+    },
+    "micronaut": {
+      "spawn": "2026-10-07T15:07:33.614354245+03:00",
+      "ready": "2026-10-07T15:07:36.215845576+03:00",
+      "first_dispatch": "2026-10-07T15:09:31.841873413+03:00",
+      "spawn_to_ready_ms": 2601,
+      "ready_to_first_dispatch_ms": 115626
+    }
+  },
+  "pass": true
+}
