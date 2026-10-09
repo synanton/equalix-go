@@ -196,6 +196,19 @@ func TestHierQuotaCap(t *testing.T) {
 	}
 }
 
+func TestHierPromotedBypassesQuota(t *testing.T) {
+	h := hierHierarchy(t, nil)
+	leaves := []domain.QueuedLeaf{
+		// At quota (capacity 0) but holding 2 promoted tasks: both still serve.
+		{FairnessKey: "acme/a", Queued: 5, Promoted: 2, MaxWeight: 1.0, InFlight: 2},
+		hierLeaf("acme/b", 1),
+	}
+	plan := hierPlan(t, h, leaves, map[string]domain.HierarchyNodeState{}, hierNoInFlight, 0, 10, 2)
+	if plan.TasksPerLeaf["acme/a"] != 2 {
+		t.Fatalf("tasksPerLeaf = %v, want acme/a:2 (promoted bypass)", plan.TasksPerLeaf)
+	}
+}
+
 func TestHierPressurePreference(t *testing.T) {
 	h := hierHierarchy(t, nil)
 	leaves := []domain.QueuedLeaf{hierLeaf("acme/busy", 10), hierLeaf("acme/idle", 10)}

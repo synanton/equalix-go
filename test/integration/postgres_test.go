@@ -75,6 +75,7 @@ func startPostgres(ctx context.Context) (*pgxpool.Pool, func(), error) {
 		"00003_virtual_time.sql",
 		"00004_hierarchy.sql",
 		"00005_db_clock_updated_at.sql",
+		"00006_baseline_hardening.sql",
 	} {
 		if err := applyMigration(ctx, pool, f); err != nil {
 			return nil, nil, err
@@ -220,6 +221,30 @@ func TestDispatchSelectionQuotaAndOrder(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].ID != uuid(20) || got[1].ID != uuid(21) {
 		t.Fatalf("order wrong: %v", ids(got))
+	}
+}
+
+func TestDispatchSelectionPromotedBypassesQuota(t *testing.T) {
+	clean(t)
+	all := []*domain.Task{
+		queuedTask(20, "a", 100),
+		queuedTask(21, "a", 0), // starvation-promoted
+	}
+	for _, tk := range all {
+		if err := tasks.Save(ctx, tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := counts.Increment(ctx, "a"); err != nil {
+		t.Fatal(err)
+	}
+	// Quota 1 with "a" holding 1 in-flight: the promoted task still dispatches.
+	got, err := tasks.FindAndLockDispatchable(ctx, 10, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != uuid(21) {
+		t.Fatalf("promoted bypass wrong: %v", ids(got))
 	}
 }
 

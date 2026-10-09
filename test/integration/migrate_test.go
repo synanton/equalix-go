@@ -84,8 +84,8 @@ func TestMigrateFreshDBAppliesSchema(t *testing.T) {
 			t.Fatalf("table %s missing after migrate", tbl)
 		}
 	}
-	if got := gooseVersions(t, dsn); got != 5 {
-		t.Fatalf("goose versions = %d, want 5", got)
+	if got := gooseVersions(t, dsn); got != 6 {
+		t.Fatalf("goose versions = %d, want 6", got)
 	}
 }
 
@@ -99,8 +99,8 @@ func TestMigrateIdempotent(t *testing.T) {
 	if err := adapter.Migrate(ctx, dsn, ""); err != nil {
 		t.Fatalf("second migrate errored: %v", err)
 	}
-	if got := gooseVersions(t, dsn); got != 5 {
-		t.Fatalf("goose versions after rerun = %d, want 5", got)
+	if got := gooseVersions(t, dsn); got != 6 {
+		t.Fatalf("goose versions after rerun = %d, want 6", got)
 	}
 }
 
@@ -128,8 +128,8 @@ func TestMigrateConcurrentSerializes(t *testing.T) {
 			t.Fatalf("concurrent migrate %d: %v", i, err)
 		}
 	}
-	if got := gooseVersions(t, dsn); got != 5 {
-		t.Fatalf("goose versions after concurrent run = %d, want 5", got)
+	if got := gooseVersions(t, dsn); got != 6 {
+		t.Fatalf("goose versions after concurrent run = %d, want 6", got)
 	}
 }
 
@@ -166,7 +166,7 @@ func TestMigrateExternalDir(t *testing.T) {
 	if err := adapter.Migrate(ctx, dsn, "../../migrations"); err != nil {
 		t.Fatal(err)
 	}
-	if got := gooseVersions(t, dsn); got != 5 {
-		t.Fatalf("goose versions via external dir = %d, want 5", got)
+	if got := gooseVersions(t, dsn); got != 6 {
+		t.Fatalf("goose versions via external dir = %d, want 6", got)
 	}
 }

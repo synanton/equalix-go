@@ -8,7 +8,7 @@ package migrations
 
 import "embed"
 
-// FS carries 00001–00005 in filename order (goose applies sorted).
+// FS carries 00001–00006 in filename order (goose applies sorted).
 //
 //go:embed *.sql
 var FS embed.FS

@@ -74,3 +74,35 @@ A load-bearing asymmetry would show here first; it does not.
    in `RunSide` drain, or retry-then-record. Not changed in this round.
 2. **Go-vs-Micronaut warmup asymmetry** (go 105 vs mn 50): warmup gates RPS per
    side independently; different counts are expected, recorded for traceability.
+
+## Post-run deltas (addendum, 2026-10-09)
+
+The runs above are pinned at Go `f8a2a21e`, Spring `11ef025e`, MN `b12176c0`.
+Since then all three sides changed identically in one semantic plus
+schema-level no-ops:
+
+- **Semantic (CORRECTION-7):** starvation-promoted tasks (priority ≤ 0) now
+  bypass the per-key quota — flat `OR priority <= 0` in the dispatch
+  queries, per-leaf `remaining = min(queued, capacity + promoted)` in the
+  hierarchical planner. Landed as Spring `fb14977`, MN `78eabf2`, and the
+  Go working tree alongside this addendum.
+- **Schema (no dispatch effect):** Java squashed V1–V6 to `V1__baseline.sql`;
+  Go added 00006 (the same CHECKs and watchdog/timeout/per-key indexes);
+  MN ported the baseline byte-identical. Same tables/columns on fresh
+  databases; CHECKs reject only what ingestion already rejects; indexes
+  don't change results.
+
+Transfer rationale: every trace in `jvg/`, `jmn/`, `gomn/` records
+`promoted = 0` on all sides (warm class never trips the 60 s deadline), so
+no recorded run exercised the changed path and the pass verdicts transfer
+to current HEADs. The changed path itself is covered by fixture tests on
+each side, never by differential: Go
+`TestDispatchSelectionPromotedBypassesQuota` /
+`TestSelectBatchPromotedBypassesQuota` / `TestHierPromotedBypassesQuota`;
+Java + Micronaut `StarvationBypassIntegrationTest` /
+`shouldServePromotedTasksBeyondQuota` (the latter two drive an extra tick:
+a native locking select need not observe the same tick's promotion write
+on every framework — PORTING.md finding 9).
+
+A re-run at current SHAs remains the full sign-off; until then the verdicts
+above stand transferred, not re-measured.

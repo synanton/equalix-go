@@ -30,3 +30,6 @@ go.work.sum
 # Editor/IDE
 .idea/
 .vscode/
+
+# mdBook output (built by .github/workflows/docs.yml)
+docs/book/

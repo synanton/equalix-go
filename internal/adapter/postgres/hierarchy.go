@@ -128,7 +128,7 @@ func (s *HierarchyStores) FindAndLockQueuedHeads(ctx context.Context, perLeaf ma
 func (s *HierarchyStores) FindQueuedLeaves(ctx context.Context) ([]domain.QueuedLeaf, error) {
 	rows, err := s.q.Query(ctx, `SELECT t.fairness_key,
             COUNT(*),
-            COUNT(*) FILTER (WHERE t.priority = 0),
+            COUNT(*) FILTER (WHERE t.priority <= 0),
             MAX(t.weight),
             COALESCE(cc.in_flight_count, 0)
         FROM tasks t

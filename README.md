@@ -17,7 +17,7 @@ This is **not a language port**. The Java code is the behavioral reference; the 
 **Pre-alpha.** Under active development. Not production-ready. See [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) for the current phase and [`CONTRIBUTING.md`](CONTRIBUTING.md) for the acceptance gates.
 
 *State as of: `298bef2` (2026-10-06) — EQLX-7 complete, v0.1.0 released.*
-*Java oracle at `11ef025` (unchanged). Bumped on phase transitions per CONTRIBUTING, not every merge.*
+*Java oracle at `11ef025` for the recorded runs (post-run deltas analyzed, verdicts transfer — see the three-way addendum in [`docs/evidence/threeway/README.md`](docs/evidence/threeway/README.md)). Bumped on phase transitions per CONTRIBUTING, not every merge.*
 
 ### Maturity
 
@@ -54,7 +54,7 @@ has. Starvation splits in two:
 |---|---|---|
 | Fairness shares (§4 bound) | Java weighted shares | ✅ warm-class (JvG 5/5, GvG 5/5; cold 3/5 JvG characterization) |
 | Dispatch order (diagnostic) | Java dispatch sequence | 🔶 evidence only, never gates (diverges every run on both pairs, including GvG) |
-| Quota bound | Java `maxPerClient` enforcement | ⬜ (fixtures green, no live run) |
+| Quota bound | Java `maxPerClient` enforcement | ⬜ (fixtures green incl. promotion-bypass on all 3 sides — CORRECTION-7, no live run) |
 | Starvation — promotion deadline | Java `max-queued-time-ms` (60s) | 🔶 characterized, not gated (cold asymmetry Go ~780 / Java ~1000; warm 0/0 both sides) |
 | Starvation — K=3 window gate | **none** (harness-original, CORRECTION-3) | — by construction; validated by fixture + spec, never by differential |
 | Cross-instance shares (fleet aggregate) | same workload, two racers, shared PG + Redis | ✅ fleet ±6 (N=5 control-derived; single-instance ±2 does not transfer — post-commit CMS window at two-tick interleave) |
@@ -421,6 +421,13 @@ Go ([equalix-go](https://github.com/synanton/equalix-go)), and Micronaut
 
 Startup, footprint and runtime characterization across all three:
 [**Equalix family comparison →**](https://github.com/synanton/.github/blob/main/profile/experiments/equalix-family-comparison.md).
+
+Published developer books:
+[equalix-go](https://synanton.github.io/equalix-go/) (this repo —
+`docs/` built with mdBook, same toolchain as the oracle),
+[Equalix](https://synanton.github.io/equalix/) (the oracle).
+Three-way differential evidence (all pairs, pinned SHAs, transfer addendum):
+[`docs/evidence/threeway/`](docs/evidence/threeway/README.md).
 
 ## License
 
