@@ -18,18 +18,24 @@ type VirtualTimeStore struct{ q querier }
 var _ port.VirtualTimeRepository = (*VirtualTimeStore)(nil)
 
 func (s *VirtualTimeStore) Reserve(ctx context.Context, key string, quantum, weight float64) (float64, error) {
-	w := weight
-	if w <= 0 {
-		w = 1.0
-	}
-	// Snapshot V first (spec: tags start at max(finish, V)); the upsert's
-	// GREATEST keeps concurrent reservers sequential.
 	v, err := s.SystemV(ctx)
 	if err != nil {
 		return 0, err
 	}
+	return s.ReserveAt(ctx, key, v, quantum, weight)
+}
+
+// ReserveAt is Reserve with a caller-provided system virtual time V. The
+// calculator reads SystemV once per batch and reserves every tag against
+// it (Java parity: the oracle snapshots V per batch, not per task),
+// halving per-task Reserve cost (SELECT + upsert → upsert).
+func (s *VirtualTimeStore) ReserveAt(ctx context.Context, key string, v, quantum, weight float64) (float64, error) {
+	w := weight
+	if w <= 0 {
+		w = 1.0
+	}
 	var tag float64
-	err = s.q.QueryRow(ctx, `INSERT INTO client_virtual_time AS cvt
+	err := s.q.QueryRow(ctx, `INSERT INTO client_virtual_time AS cvt
         (fairness_key, virtual_time, virtual_finish)
         VALUES ($1, $2::float8, $2::float8 + $3::float8)
         ON CONFLICT (fairness_key) DO UPDATE SET

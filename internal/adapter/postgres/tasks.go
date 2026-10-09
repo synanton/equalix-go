@@ -67,6 +67,9 @@ func (s *TaskStore) Save(ctx context.Context, t *domain.Task) error {
 }
 
 func (s *TaskStore) insert(ctx context.Context, t *domain.Task) error {
+	if t.CreatedAt.IsZero() {
+		t.CreatedAt = time.Now()
+	}
 	// updated_at omitted: DEFAULT now() on insert (trigger covers UPDATE).
 	err := s.q.QueryRow(ctx, `INSERT INTO tasks
             (id, fairness_key, weight, status, priority, virtual_finish,
@@ -90,6 +93,101 @@ func (s *TaskStore) insert(ctx context.Context, t *domain.Task) error {
 	}
 	t.Version = 0
 	return nil
+}
+
+// Insert persists a brand-new task with a single INSERT (no UPDATE-miss
+// probe): only for rows known absent (ingestion). A conflicting ID reports
+// ErrVersionConflict, like the Save fallback.
+func (s *TaskStore) Insert(ctx context.Context, t *domain.Task) error {
+	return s.insert(ctx, t)
+}
+
+// MarkQueued assigns queueing state to one RECEIVED task: one targeted
+// UPDATE instead of a full-row Save. Zero matched rows (moved concurrently)
+// report no error — the calculator skips the task.
+func (s *TaskStore) MarkQueued(ctx context.Context, id string, priority int64, virtualFinish float64) error {
+	_, err := s.q.Exec(ctx, `UPDATE tasks SET status = 'QUEUED', priority = $2,
+        virtual_finish = $3, version = version + 1
+        WHERE id = $1::uuid AND status = 'RECEIVED'`, id, priority, virtualFinish)
+	if err != nil {
+		return fmt.Errorf("postgres: mark queued %s: %w", id, err)
+	}
+	return nil
+}
+
+// BulkMarkDispatched marks locked QUEUED tasks DISPATCHED in one UPDATE.
+// The caller holds the rows (FindAndLockDispatchable); a shortfall under
+// held locks is unexpected but reported, never hidden.
+func (s *TaskStore) BulkMarkDispatched(ctx context.Context, ids []string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tag, err := s.q.Exec(ctx, `UPDATE tasks SET status = 'DISPATCHED', version = version + 1
+        WHERE id = ANY($1::uuid[]) AND status = 'QUEUED'`, ids)
+	if err != nil {
+		return 0, fmt.Errorf("postgres: bulk dispatch %d tasks: %w", len(ids), err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// PromoteStarved sets priority 0 on starved QUEUED tasks in one UPDATE.
+// Rows already promoted are untouched, so repeated ticks don't churn
+// versions (the EQLX-7 livelock fuel). Returns promoted rows for the log.
+func (s *TaskStore) PromoteStarved(ctx context.Context, olderThan time.Duration, limit int) (int, error) {
+	tag, err := s.q.Exec(ctx, `UPDATE tasks SET priority = 0, version = version + 1
+        WHERE id IN (
+            SELECT id FROM tasks
+            WHERE status = 'QUEUED' AND is_sequential = false
+              AND (priority IS NULL OR priority <> 0)
+              AND created_at < now() - ($1::text || ' milliseconds')::interval
+            ORDER BY created_at ASC LIMIT $2
+        )`, strconv.FormatInt(int64(olderThan/time.Millisecond), 10), limit)
+	if err != nil {
+		return 0, fmt.Errorf("postgres: promote starved: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// Complete terminally transitions one in-flight task: status guard and
+// version check run in the UPDATE. False means already moved (duplicate
+// completion or concurrent mover) — the caller re-reads to tell them apart.
+func (s *TaskStore) Complete(ctx context.Context, id string, version int64, status domain.Status,
+	lastError string, completedAt time.Time) (bool, error) {
+	tag, err := s.q.Exec(ctx, `UPDATE tasks SET status = $2::task_status,
+        last_error = $3, completed_at = $4, version = version + 1
+        WHERE id = $1::uuid AND status IN ('DISPATCHED', 'COMMITTED') AND version = $5`,
+		id, string(status), nullableText(lastError), nullableTime(completedAt), version)
+	if err != nil {
+		return false, fmt.Errorf("postgres: complete task %s: %w", id, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// MarkCommitted records executor acceptance (DISPATCHED → COMMITTED). Zero
+// matched rows (already moved on) report false, never an error — the async
+// ack must not overwrite progress.
+func (s *TaskStore) MarkCommitted(ctx context.Context, id string) (bool, error) {
+	tag, err := s.q.Exec(ctx, `UPDATE tasks SET status = 'COMMITTED', version = version + 1
+        WHERE id = $1::uuid AND status = 'DISPATCHED'`, id)
+	if err != nil {
+		return false, fmt.Errorf("postgres: mark committed %s: %w", id, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// MarkTimeout expires one in-flight task with the same in-UPDATE guards as
+// Complete; a concurrent transition reports false and the caller skips the
+// slot release instead of clobbering it.
+func (s *TaskStore) MarkTimeout(ctx context.Context, id string, version int64, lastError string,
+	completedAt time.Time) (bool, error) {
+	tag, err := s.q.Exec(ctx, `UPDATE tasks SET status = 'TIMEOUT',
+        last_error = $2, completed_at = $3, version = version + 1
+        WHERE id = $1::uuid AND status IN ('DISPATCHED', 'COMMITTED') AND version = $4`,
+		id, nullableText(lastError), nullableTime(completedAt), version)
+	if err != nil {
+		return false, fmt.Errorf("postgres: mark timeout %s: %w", id, err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // FindByID loads one task or returns port.ErrNotFound.

@@ -41,6 +41,26 @@ func (s *stubInner) FindByID(context.Context, string) (*domain.Task, error) {
 
 func (s *stubInner) Save(context.Context, *domain.Task) error { return nil }
 
+func (s *stubInner) Insert(context.Context, *domain.Task) error { return nil }
+
+func (s *stubInner) MarkQueued(context.Context, string, int64, float64) error { return nil }
+
+func (s *stubInner) BulkMarkDispatched(context.Context, []string) (int, error) { return 0, nil }
+
+func (s *stubInner) PromoteStarved(context.Context, time.Duration, int) (int, error) {
+	return 0, nil
+}
+
+func (s *stubInner) Complete(context.Context, string, int64, domain.Status, string, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (s *stubInner) MarkCommitted(context.Context, string) (bool, error) { return false, nil }
+
+func (s *stubInner) MarkTimeout(context.Context, string, int64, string, time.Time) (bool, error) {
+	return false, nil
+}
+
 func (s *stubInner) FindStarved(context.Context, time.Duration, int) ([]*domain.Task, error) {
 	return nil, nil
 }

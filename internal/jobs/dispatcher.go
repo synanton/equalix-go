@@ -83,18 +83,14 @@ func (d *Dispatcher) TickForTest(ctx context.Context) error { return d.tick(ctx)
 func (d *Dispatcher) tick(ctx context.Context) error {
 	cfg := d.deps.Config
 
-	// Starvation backstop at tick top (spec §5.1): promoted tasks carry
-	// priority 0 into selection, bypassing quota.
-	starved, err := d.deps.Tasks.FindStarved(ctx, cfg.MaxQueuedTime, cfg.WorkerPollSize)
+	// Starvation backstop at tick top (spec §5.1): one bulk UPDATE sets
+	// priority 0; promoted tasks bypass quota in selection.
+	promoted, err := d.deps.Tasks.PromoteStarved(ctx, cfg.MaxQueuedTime, cfg.WorkerPollSize)
 	if err != nil {
 		return err
 	}
-	for _, t := range starved {
-		t.Priority = 0
-		t.HasPriority = true
-		if err := d.deps.Tasks.Save(ctx, t); err != nil {
-			return err
-		}
+	if promoted > 0 {
+		d.deps.Log.Warn("promoted starved tasks to front of queue", "count", promoted)
 	}
 
 	// Capacity snapshot. Undershoot tolerance (documented): pool.Free() is
@@ -132,17 +128,32 @@ func (d *Dispatcher) tick(ctx context.Context) error {
 			return err
 		}
 		advances := make(map[string]float64, len(tasks))
+		if len(tasks) > 0 {
+			ids := make([]string, 0, len(tasks))
+			for _, t := range tasks {
+				ids = append(ids, t.ID)
+			}
+			// Single bulk status UPDATE for the locked batch (rows held by
+			// this transaction); per-key counts aggregate below into one
+			// upsert per key instead of one per task.
+			marked, err := tx.Tasks.BulkMarkDispatched(ctx, ids)
+			if err != nil {
+				return err
+			}
+			if marked != len(tasks) {
+				d.deps.Log.Warn("dispatch transition persisted short of locked batch",
+					"marked", marked, "locked", len(tasks))
+			}
+		}
+		counts := make(map[string]int, len(tasks))
 		for _, t := range tasks {
-			t.Status = domain.StatusDispatched
-			if err := tx.Tasks.Save(ctx, t); err != nil {
-				return err
-			}
-			if err := tx.Counts.Increment(ctx, t.FairnessKey); err != nil {
-				return err
-			}
+			counts[t.FairnessKey]++
 			if t.VirtualFinish > advances[t.FairnessKey] {
 				advances[t.FairnessKey] = t.VirtualFinish
 			}
+		}
+		if err := tx.Counts.AddBatch(ctx, counts); err != nil {
+			return err
 		}
 		if err := tx.VirtualTime.RecordDispatch(ctx, advances, nil); err != nil {
 			return err
@@ -265,6 +276,8 @@ func (d *Dispatcher) tickHierarchical(ctx context.Context, free int) error {
 		for _, t := range locked {
 			byKey[t.FairnessKey] = append(byKey[t.FairnessKey], t)
 		}
+		var ids []string
+		counts := map[string]int{}
 		for _, key := range plan.PickOrder {
 			queue := byKey[key]
 			if len(queue) == 0 {
@@ -272,14 +285,15 @@ func (d *Dispatcher) tickHierarchical(ctx context.Context, free int) error {
 			}
 			t := queue[0]
 			byKey[key] = queue[1:]
-			t.Status = domain.StatusDispatched
-			if err := tx.Tasks.Save(ctx, t); err != nil {
-				return err
-			}
-			if err := tx.Counts.Increment(ctx, t.FairnessKey); err != nil {
-				return err
-			}
+			ids = append(ids, t.ID)
+			counts[t.FairnessKey]++
 			selected = append(selected, t)
+		}
+		if _, err := tx.Tasks.BulkMarkDispatched(ctx, ids); err != nil {
+			return err
+		}
+		if err := tx.Counts.AddBatch(ctx, counts); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -332,23 +346,16 @@ func (d *Dispatcher) globalInFlight(ctx context.Context) (int, error) {
 	return total, nil
 }
 
-// markCommitted moves DISPATCHED → COMMITTED after a 2xx ack.
+// markCommitted moves DISPATCHED → COMMITTED after a 2xx ack: one guarded
+// UPDATE, no pre-read. Zero matched rows (raced with timeout/completion)
+// report success — same as stale, not a send failure.
 func (d *Dispatcher) markCommitted(ctx context.Context, t *domain.Task) error {
-	cur, err := d.deps.Tasks.FindByID(ctx, t.ID)
+	moved, err := d.deps.Tasks.MarkCommitted(ctx, t.ID)
 	if err != nil {
 		return err
 	}
-	if cur.Status != domain.StatusDispatched {
+	if !moved {
 		return nil // raced with timeout/completion; ack is stale
-	}
-	cur.Status = domain.StatusCommitted
-	if err := d.deps.Tasks.Save(ctx, cur); err != nil {
-		// Lost race to a concurrent mover (timeout/completion won):
-		// same as stale, not a send failure.
-		if errors.Is(err, port.ErrVersionConflict) {
-			return nil
-		}
-		return err
 	}
 	return nil
 }

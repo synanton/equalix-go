@@ -68,6 +68,73 @@ func (f *fakeTasks) FindStarved(_ context.Context, _ time.Duration, _ int) ([]*d
 	return nil, nil
 }
 
+func (f *fakeTasks) Insert(ctx context.Context, t *domain.Task) error {
+	return f.Save(ctx, t)
+}
+
+func (f *fakeTasks) MarkQueued(_ context.Context, id string, priority int64, virtualFinish float64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.tasks[id]
+	if !ok || t.Status != domain.StatusReceived {
+		return nil
+	}
+	t.Status = domain.StatusQueued
+	t.Priority = priority
+	t.HasPriority = true
+	t.VirtualFinish = virtualFinish
+	return nil
+}
+
+func (f *fakeTasks) BulkMarkDispatched(_ context.Context, ids []string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	marked := 0
+	for _, id := range ids {
+		if t, ok := f.tasks[id]; ok && t.Status == domain.StatusQueued {
+			t.Status = domain.StatusDispatched
+			marked++
+		}
+	}
+	return marked, nil
+}
+
+func (f *fakeTasks) PromoteStarved(_ context.Context, _ time.Duration, _ int) (int, error) {
+	return 0, nil
+}
+
+func (f *fakeTasks) Complete(_ context.Context, id string, version int64, status domain.Status,
+	lastError string, completedAt time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.tasks[id]
+	if !ok || !t.Status.IsInFlight() || t.Version != version {
+		return false, nil
+	}
+	t.Status = status
+	t.LastError = lastError
+	t.CompletedAt = completedAt
+	t.Version++
+	return true, nil
+}
+
+func (f *fakeTasks) MarkCommitted(_ context.Context, id string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.tasks[id]
+	if !ok || t.Status != domain.StatusDispatched {
+		return false, nil
+	}
+	t.Status = domain.StatusCommitted
+	t.Version++
+	return true, nil
+}
+
+func (f *fakeTasks) MarkTimeout(ctx context.Context, id string, version int64, lastError string,
+	completedAt time.Time) (bool, error) {
+	return f.Complete(ctx, id, version, domain.StatusTimeout, lastError, completedAt)
+}
+
 func (f *fakeTasks) FindTimedOut(_ context.Context, _ time.Duration, _ int) ([]*domain.Task, error) {
 	return nil, nil
 }
@@ -118,6 +185,15 @@ func (f *fakeCounts) Increment(_ context.Context, k string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.m[k]++
+	return nil
+}
+
+func (f *fakeCounts) AddBatch(_ context.Context, deltas map[string]int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for k, d := range deltas {
+		f.m[k] += d
+	}
 	return nil
 }
 

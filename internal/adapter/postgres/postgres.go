@@ -13,7 +13,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/synanton/equalix-go/internal/port"
 )
@@ -29,7 +28,7 @@ type querier interface {
 // Stores bundles the pool-bound repositories and the Transactor.
 // Obtain via NewStores; never construct stores directly.
 type Stores struct {
-	pool *pgxpool.Pool
+	pool TxBeginner
 
 	Tasks       *TaskStore
 	Counts      *CountsStore
@@ -38,13 +37,21 @@ type Stores struct {
 	Hierarchy   *HierarchyStores
 }
 
+// TxBeginner opens transactions; *pgxpool.Pool is the production
+// implementation. Exported so tests can interpose a counting pool around
+// the same Transact path the jobs use — the dispatch hot path pays nothing
+// for the seam (one interface call per tick, same as the method call).
+type TxBeginner interface {
+	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
+}
+
 // NewStores returns pool-bound repositories over pool.
-func NewStores(pool *pgxpool.Pool) *Stores {
-	return bind(pool, pool)
+func NewStores(pool TxBeginner) *Stores {
+	return bind(pool, pool.(querier))
 }
 
 // bind builds stores over one querier, remembering pool for Transact.
-func bind(pool *pgxpool.Pool, q querier) *Stores {
+func bind(pool TxBeginner, q querier) *Stores {
 	return &Stores{
 		pool:        pool,
 		Tasks:       &TaskStore{q: q},

@@ -27,6 +27,36 @@ type TaskRepository interface {
 	// responsibility; a lost race returns ErrVersionConflict (wrapped),
 	// never a transport-shaped error, so callers can errors.Is on it.
 	Save(ctx context.Context, task *domain.Task) error
+	// Insert persists a brand-new task with a single INSERT. Unlike Save
+	// (UPDATE-miss then INSERT), it never probes for an existing row —
+	// only for rows known absent (ingestion).
+	Insert(ctx context.Context, task *domain.Task) error
+	// MarkQueued assigns queueing state (status, priority, virtual finish
+	// tag) to one RECEIVED task: one targeted UPDATE, no full-row Save.
+	MarkQueued(ctx context.Context, id string, priority int64, virtualFinish float64) error
+	// BulkMarkDispatched marks locked QUEUED tasks DISPATCHED in one
+	// UPDATE (caller holds the rows via FindAndLockDispatchable). Returns
+	// transitioned rows; a shortfall under held locks is unexpected.
+	BulkMarkDispatched(ctx context.Context, ids []string) (int, error)
+	// PromoteStarved sets priority 0 on starved QUEUED tasks in one UPDATE
+	// (rows already promoted are untouched, so repeated ticks don't churn
+	// versions). Returns promoted rows for the log line.
+	PromoteStarved(ctx context.Context, olderThan time.Duration, limit int) (int, error)
+	// Complete terminally transitions one in-flight task: status guard and
+	// version check run in the UPDATE. Returns transitioned=false when the
+	// row already moved (duplicate completion or concurrent mover) — the
+	// caller re-reads to tell the two apart, like the Save conflict path.
+	Complete(ctx context.Context, id string, version int64, status domain.Status,
+		lastError string, completedAt time.Time) (bool, error)
+	// MarkCommitted records executor acceptance (DISPATCHED → COMMITTED).
+	// Zero matched rows (already moved on) report false, never an error —
+	// the async ack must not overwrite progress.
+	MarkCommitted(ctx context.Context, id string) (bool, error)
+	// MarkTimeout expires one in-flight task (→ TIMEOUT) with the same
+	// in-UPDATE guards as Complete; a concurrent transition reports false
+	// and the caller skips the slot release instead of clobbering it.
+	MarkTimeout(ctx context.Context, id string, version int64, lastError string,
+		completedAt time.Time) (bool, error)
 	// FindAndLockDispatchable locks up to limit QUEUED non-sequential
 	// tasks under quota, ordered by (priority, createdAt, id).
 	// maxPerClient <= 0 disables the per-key ceiling (spec §5.1).

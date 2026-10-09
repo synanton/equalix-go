@@ -77,6 +77,36 @@ func (f *FirstQueued) CountReceived(ctx context.Context) (int, error) {
 	return f.inner.CountReceived(ctx)
 }
 
+func (f *FirstQueued) Insert(ctx context.Context, t *domain.Task) error {
+	return f.inner.Insert(ctx, t)
+}
+
+func (f *FirstQueued) MarkQueued(ctx context.Context, id string, priority int64, virtualFinish float64) error {
+	return f.inner.MarkQueued(ctx, id, priority, virtualFinish)
+}
+
+func (f *FirstQueued) BulkMarkDispatched(ctx context.Context, ids []string) (int, error) {
+	return f.inner.BulkMarkDispatched(ctx, ids)
+}
+
+func (f *FirstQueued) PromoteStarved(ctx context.Context, olderThan time.Duration, limit int) (int, error) {
+	return f.inner.PromoteStarved(ctx, olderThan, limit)
+}
+
+func (f *FirstQueued) Complete(ctx context.Context, id string, version int64, status domain.Status,
+	lastError string, completedAt time.Time) (bool, error) {
+	return f.inner.Complete(ctx, id, version, status, lastError, completedAt)
+}
+
+func (f *FirstQueued) MarkCommitted(ctx context.Context, id string) (bool, error) {
+	return f.inner.MarkCommitted(ctx, id)
+}
+
+func (f *FirstQueued) MarkTimeout(ctx context.Context, id string, version int64, lastError string,
+	completedAt time.Time) (bool, error) {
+	return f.inner.MarkTimeout(ctx, id, version, lastError, completedAt)
+}
+
 var _ port.TaskRepository = (*FirstQueued)(nil)
 
 // Starving decorates a repository to starve one tenant: the first skipCalls
@@ -150,6 +180,36 @@ func (s *Starving) CountReceived(ctx context.Context) (int, error) {
 	return s.inner.CountReceived(ctx)
 }
 
+func (s *Starving) Insert(ctx context.Context, t *domain.Task) error {
+	return s.inner.Insert(ctx, t)
+}
+
+func (s *Starving) MarkQueued(ctx context.Context, id string, priority int64, virtualFinish float64) error {
+	return s.inner.MarkQueued(ctx, id, priority, virtualFinish)
+}
+
+func (s *Starving) BulkMarkDispatched(ctx context.Context, ids []string) (int, error) {
+	return s.inner.BulkMarkDispatched(ctx, ids)
+}
+
+func (s *Starving) PromoteStarved(ctx context.Context, olderThan time.Duration, limit int) (int, error) {
+	return s.inner.PromoteStarved(ctx, olderThan, limit)
+}
+
+func (s *Starving) Complete(ctx context.Context, id string, version int64, status domain.Status,
+	lastError string, completedAt time.Time) (bool, error) {
+	return s.inner.Complete(ctx, id, version, status, lastError, completedAt)
+}
+
+func (s *Starving) MarkCommitted(ctx context.Context, id string) (bool, error) {
+	return s.inner.MarkCommitted(ctx, id)
+}
+
+func (s *Starving) MarkTimeout(ctx context.Context, id string, version int64, lastError string,
+	completedAt time.Time) (bool, error) {
+	return s.inner.MarkTimeout(ctx, id, version, lastError, completedAt)
+}
+
 var _ port.TaskRepository = (*Starving)(nil)
 
 // QuotaIgnoring decorates a repository to burst one tenant: the first
@@ -220,6 +280,36 @@ func (q *QuotaIgnoring) ListByKey(ctx context.Context, key string, status *domai
 
 func (q *QuotaIgnoring) CountReceived(ctx context.Context) (int, error) {
 	return q.inner.CountReceived(ctx)
+}
+
+func (q *QuotaIgnoring) Insert(ctx context.Context, t *domain.Task) error {
+	return q.inner.Insert(ctx, t)
+}
+
+func (q *QuotaIgnoring) MarkQueued(ctx context.Context, id string, priority int64, virtualFinish float64) error {
+	return q.inner.MarkQueued(ctx, id, priority, virtualFinish)
+}
+
+func (q *QuotaIgnoring) BulkMarkDispatched(ctx context.Context, ids []string) (int, error) {
+	return q.inner.BulkMarkDispatched(ctx, ids)
+}
+
+func (q *QuotaIgnoring) PromoteStarved(ctx context.Context, olderThan time.Duration, limit int) (int, error) {
+	return q.inner.PromoteStarved(ctx, olderThan, limit)
+}
+
+func (q *QuotaIgnoring) Complete(ctx context.Context, id string, version int64, status domain.Status,
+	lastError string, completedAt time.Time) (bool, error) {
+	return q.inner.Complete(ctx, id, version, status, lastError, completedAt)
+}
+
+func (q *QuotaIgnoring) MarkCommitted(ctx context.Context, id string) (bool, error) {
+	return q.inner.MarkCommitted(ctx, id)
+}
+
+func (q *QuotaIgnoring) MarkTimeout(ctx context.Context, id string, version int64, lastError string,
+	completedAt time.Time) (bool, error) {
+	return q.inner.MarkTimeout(ctx, id, version, lastError, completedAt)
 }
 
 var _ port.TaskRepository = (*QuotaIgnoring)(nil)
