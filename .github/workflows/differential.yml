@@ -21,7 +21,7 @@ on:
     inputs:
       java_sha:
         description: "Pinned Java oracle commit (see spec §13 oracle determination)"
-        default: "996fc8b"
+        default: "11ef025"
         required: true
       workload:
         description: "Workload file under test/differential/workloads"

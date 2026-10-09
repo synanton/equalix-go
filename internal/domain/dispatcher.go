@@ -81,7 +81,9 @@ func byPriority(tasks []*Task) {
 // SelectBatch picks up to freeSlots dispatchable tasks from candidates,
 // mirroring the flat dispatcher SQL (spec §5.1): non-sequential QUEUED
 // tasks under the per-key quota (maxPerClient <= 0 disables the ceiling),
-// ordered by (priority, createdAt, id).
+// ordered by (priority, createdAt, id). Starvation-promoted tasks
+// (HasPriority && Priority <= 0) bypass the quota, like the SQL's
+// `OR t.priority <= 0`.
 func SelectBatch(candidates []*Task, freeSlots, maxPerClient int, inFlight func(key string) int) []*Task {
 	if freeSlots <= 0 {
 		return nil
@@ -91,7 +93,7 @@ func SelectBatch(candidates []*Task, freeSlots, maxPerClient int, inFlight func(
 		if t.Status != StatusQueued || t.Sequential {
 			continue
 		}
-		if maxPerClient > 0 && inFlight(t.FairnessKey) >= maxPerClient {
+		if maxPerClient > 0 && inFlight(t.FairnessKey) >= maxPerClient && !(t.HasPriority && t.Priority <= 0) {
 			continue
 		}
 		eligible = append(eligible, t)

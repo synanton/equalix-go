@@ -122,12 +122,14 @@ const dispatchableBase = `SELECT t.id::text, t.fairness_key, t.weight::float8,
     LIMIT $1 FOR UPDATE OF t SKIP LOCKED`
 
 // FindAndLockDispatchable locks up to limit dispatchable tasks (quota-aware
-// flat selection, spec §5.1). Call inside Transact: rows stay locked until
-// the caller Saves status moves and commits.
+// flat selection, spec §5.1). Starvation-promoted tasks (priority <= 0)
+// bypass the quota (spec §5.1 backstop); NULL priorities never bypass.
+// Call inside Transact: rows stay locked until the caller Saves status
+// moves and commits.
 func (s *TaskStore) FindAndLockDispatchable(ctx context.Context, limit, maxPerClient int) ([]*domain.Task, error) {
 	if maxPerClient > 0 {
 		return s.queryTasks(ctx, fmt.Sprintf(dispatchableBase,
-			`cc.in_flight_count < $2 OR cc.in_flight_count IS NULL`), limit, maxPerClient)
+			`cc.in_flight_count < $2 OR cc.in_flight_count IS NULL OR t.priority <= 0`), limit, maxPerClient)
 	}
 	return s.queryTasks(ctx, fmt.Sprintf(dispatchableBase, `true`), limit)
 }

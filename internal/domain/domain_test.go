@@ -157,6 +157,18 @@ func TestSelectBatchOrderingAndQuota(t *testing.T) {
 	}
 }
 
+func TestSelectBatchPromotedBypassesQuota(t *testing.T) {
+	now := time.Now()
+	mk := func(id, key string, p int64) *Task { return queuedTask(id, key, p, now) }
+	cands := []*Task{mk("a", "a", 100), mk("b", "a", 0)}
+	counts := map[string]int{"a": 5}
+	// "a" is at quota (5 >= 5): only the promoted task dispatches, first.
+	got := SelectBatch(cands, 10, 5, func(k string) int { return counts[k] })
+	if len(got) != 1 || got[0].ID != "b" {
+		t.Fatalf("SelectBatch = %v, want [b]", ids(got))
+	}
+}
+
 func TestPromoteStarved(t *testing.T) {
 	now := time.Now()
 	old := queuedTask("old", "a", 9999, now.Add(-2*time.Minute))

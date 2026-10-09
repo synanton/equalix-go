@@ -256,7 +256,17 @@ func Plan(leaves []QueuedLeaf, h *FairnessHierarchy, states map[string]Hierarchy
 				capacity = room
 			}
 		}
-		if capacity <= 0 {
+		// Starvation-promoted tasks bypass the quota (spec §5.1 backstop):
+		// they are served first even when the leaf is at its ceiling.
+		promoted := leaf.Promoted
+		if promoted > leaf.Queued {
+			promoted = leaf.Queued
+		}
+		remaining := leaf.Queued
+		if capacity+promoted < remaining {
+			remaining = capacity + promoted
+		}
+		if remaining <= 0 {
 			continue
 		}
 		parent := root
@@ -275,10 +285,10 @@ func Plan(leaves []QueuedLeaf, h *FairnessHierarchy, states map[string]Hierarchy
 			}
 			parent = current
 		}
-		parent.remaining = capacity
-		parent.promoted = leaf.Promoted
-		if parent.promoted > capacity {
-			parent.promoted = capacity
+		parent.remaining = remaining
+		parent.promoted = promoted
+		if parent.promoted > remaining {
+			parent.promoted = remaining
 		}
 		for node := parent; node != nil; node = node.parent {
 			node.activeLeaves++

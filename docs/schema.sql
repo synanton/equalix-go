@@ -1,9 +1,11 @@
 -- equalix-go schema reference
 --
 -- Extracted from Java Equalix: src/main/resources/db/migration/V1..V5
+-- (Java has since squashed to V1__baseline.sql; the Go goose chain
+-- 00001–00006 converges to the same effective schema — see the 00006
+-- section at the end. V1..V5 blocks below are kept verbatim as history.)
 -- This file is a consolidated, annotated reference.
--- The authoritative migrations for equalix-go will live in /migrations
--- (tooling decision: goose vs golang-migrate, deferred to EQLX-1).
+-- The authoritative migrations for equalix-go live in /migrations (goose).
 --
 -- Source: https://github.com/synanton/equalix/tree/main/src/main/resources/db/migration
 --
@@ -173,6 +175,35 @@ CREATE INDEX idx_tasks_queued_by_key
 
 
 -- ─────────────────────────────────────────────────────────────
+-- 00006: baseline hardening (converges with Java V1__baseline.sql)
+-- File: migrations/00006_baseline_hardening.sql
+-- ─────────────────────────────────────────────────────────────
+--
+-- Additive only: CHECKs the app layer already enforces, plus the indexes
+-- the Java baseline added. Effective schema is identical on all sides.
+
+ALTER TABLE tasks
+    ADD CONSTRAINT tasks_weight_positive CHECK (weight > 0);
+ALTER TABLE client_counts
+    ADD CONSTRAINT client_counts_in_flight_nonnegative CHECK (in_flight_count >= 0);
+
+-- Watchdog reconciliation (GROUP BY fairness_key over in-flight rows).
+CREATE INDEX idx_tasks_in_flight_by_key
+    ON tasks (fairness_key)
+    WHERE status IN ('DISPATCHED', 'COMMITTED');
+
+-- Timeout sweep (ORDER BY updated_at over in-flight rows).
+CREATE INDEX idx_tasks_in_flight_updated_at
+    ON tasks (updated_at)
+    WHERE status IN ('DISPATCHED', 'COMMITTED');
+
+-- Per-key ordered lookups; supersedes idx_tasks_fairness_key.
+CREATE INDEX idx_tasks_fairness_key_created_at
+    ON tasks (fairness_key, created_at);
+DROP INDEX idx_tasks_fairness_key;
+
+
+-- ─────────────────────────────────────────────────────────────
 -- Notes for equalix-go
 -- ─────────────────────────────────────────────────────────────
 --
@@ -200,9 +231,13 @@ CREATE INDEX idx_tasks_queued_by_key
 --   idx_tasks_status_priority (status, priority) — flat dispatcher ORDER BY
 --     priority ASC NULLS LAST, created_at ASC, id ASC ... FOR UPDATE SKIP LOCKED.
 --   idx_tasks_status_created_at (status, created_at) — starvation promotion scan,
---     oldest-candidate pool for aging, timeout scan on updated_at (note: timeout
---     filter is on updated_at; no dedicated (status, updated_at) index in V1..V5).
---   idx_tasks_fairness_key — per-key lookups.
+--     oldest-candidate pool for aging.
+--   idx_tasks_in_flight_by_key (partial, fairness_key) — watchdog
+--     reconciliation GROUP BY over DISPATCHED/COMMITTED (00006; Java baseline).
+--   idx_tasks_in_flight_updated_at (partial, updated_at) — timeout sweep
+--     ORDER BY over DISPATCHED/COMMITTED (00006; Java baseline).
+--   idx_tasks_fairness_key_created_at — per-key ordered lookups
+--     (supersedes the V1 single-column idx_tasks_fairness_key in 00006).
 --   idx_tasks_sequential_dispatch / idx_tasks_next_in_sequence (partial) —
 --     sequential dispatch by (fairness_key, sequence_number).
 --   idx_tasks_queued_by_key (partial, INCLUDE weight) — hierarchical planner

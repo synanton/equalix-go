@@ -1,0 +1,22 @@
+[book]
+title = "equalix-go Developer Documentation"
+authors = ["Andrei Minin"]
+description = "Developer guide, architecture, API and differential evidence for the equalix-go fair scheduler"
+language = "en"
+src = "."
+
+[build]
+build-dir = "book"
+
+[preprocessor.katex]
+after = ["links"]
+
+[output.html]
+site-url = "/equalix-go/"
+git-repository-url = "https://github.com/synanton/equalix-go"
+edit-url-template = "https://github.com/synanton/equalix-go/edit/main/docs/{path}"
+default-theme = "light"
+preferred-dark-theme = "navy"
+
+[output.html.fold]
+enable = true
