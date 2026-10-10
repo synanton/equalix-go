@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 
@@ -50,7 +51,14 @@ func (s *VirtualTimeStore) ReserveAt(ctx context.Context, key string, v, quantum
 func (s *VirtualTimeStore) RecordDispatch(ctx context.Context, tags, credits map[string]float64) error {
 	peak := 0.0
 	first := true
-	for key, tag := range tags {
+	// Key order, like every other multi-row write in a tick (P1).
+	keys := make([]string, 0, len(tags))
+	for key := range tags {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		tag := tags[key]
 		_, err := s.q.Exec(ctx, `INSERT INTO client_virtual_time AS cvt
             (fairness_key, virtual_time, virtual_finish)
             VALUES ($1, $2, $2)

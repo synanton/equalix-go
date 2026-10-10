@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -39,16 +40,20 @@ func (s *CountsStore) add(ctx context.Context, key string, delta int) error {
 }
 
 // AddBatch applies per-key deltas in one UNNEST upsert: a dispatch tick's N
-// increments become one statement (same GREATEST floor per key).
+// increments become one statement (same GREATEST floor per key). Keys sort
+// before binding so concurrent ticks take row locks in the same order (P1).
 func (s *CountsStore) AddBatch(ctx context.Context, deltas map[string]int) error {
 	if len(deltas) == 0 {
 		return nil
 	}
 	keys := make([]string, 0, len(deltas))
-	amounts := make([]int32, 0, len(deltas))
-	for k, d := range deltas {
+	for k := range deltas {
 		keys = append(keys, k)
-		amounts = append(amounts, int32(d))
+	}
+	sort.Strings(keys)
+	amounts := make([]int32, 0, len(deltas))
+	for _, k := range keys {
+		amounts = append(amounts, int32(deltas[k]))
 	}
 	_, err := s.q.Exec(ctx, `INSERT INTO client_counts AS cc (fairness_key, in_flight_count)
         SELECT key, GREATEST(0, delta) FROM UNNEST($1::text[], $2::int[]) AS t(key, delta)

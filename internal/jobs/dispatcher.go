@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/synanton/equalix-go/internal/domain"
@@ -133,6 +134,9 @@ func (d *Dispatcher) tick(ctx context.Context) error {
 			for _, t := range tasks {
 				ids = append(ids, t.ID)
 			}
+			// Sorted ids: concurrent ticks take row locks in the same order,
+			// so they block instead of deadlocking (P1, oracle parity).
+			sort.Strings(ids)
 			// Single bulk status UPDATE for the locked batch (rows held by
 			// this transaction); per-key counts aggregate below into one
 			// upsert per key instead of one per task.
@@ -309,19 +313,33 @@ func (d *Dispatcher) tickHierarchical(ctx context.Context, free int) error {
 			FairnessKey: t.FairnessKey, Weight: t.EffectiveWeight(),
 		})
 	}
-	for nodeKey, delta := range domain.Charges(dispatched, plan, hier, domain.DefaultQuantum) {
+	charges := domain.Charges(dispatched, plan, hier, domain.DefaultQuantum)
+	// Key order, like every other multi-row write in a tick (P1).
+	for _, nodeKey := range sortedKeys(charges) {
+		delta := charges[nodeKey]
 		floor := plan.NodeFloors[nodeKey]
 		if err := d.deps.HStates.ChargeVirtualTime(ctx, nodeKey, floor, delta); err != nil {
 			return err
 		}
 	}
-	for nodeKey, floor := range plan.ChildrenFloors {
-		if err := d.deps.HStates.RaiseChildrenFloor(ctx, nodeKey, floor); err != nil {
+	for _, nodeKey := range sortedKeys(plan.ChildrenFloors) {
+		if err := d.deps.HStates.RaiseChildrenFloor(ctx, nodeKey, plan.ChildrenFloors[nodeKey]); err != nil {
 			return err
 		}
 	}
 	d.sendAll(ctx, selected)
 	return nil
+}
+
+// sortedKeys returns the map's keys in ascending order: multi-row writes in a
+// tick always run in key order so concurrent ticks block instead of deadlocking.
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // toInt64Map widens counts for the ancestor expansion (which works in
