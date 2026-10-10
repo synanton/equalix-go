@@ -60,16 +60,13 @@ func (c *Calculator) tick(ctx context.Context) error {
 
 	// Starvation backstop first (spec §5.1): same promotion the dispatcher
 	// applies, so a task starved between ticks is already 0 when selected.
-	starved, err := c.deps.Tasks.FindStarved(ctx, cfg.MaxQueuedTime, cfg.WorkerPollSize)
+	// One bulk UPDATE; the rowcount feeds the saturation log below.
+	promoted, err := c.deps.Tasks.PromoteStarved(ctx, cfg.MaxQueuedTime, cfg.WorkerPollSize)
 	if err != nil {
 		return err
 	}
-	for _, t := range starved {
-		t.Priority = 0
-		t.HasPriority = true
-		if err := c.deps.Tasks.Save(ctx, t); err != nil {
-			return err
-		}
+	if promoted > 0 {
+		c.deps.Log.Warn("calculator promoted starved tasks", "count", promoted)
 	}
 
 	received, err := c.deps.Tasks.FindReceived(ctx, cfg.WorkerPollSize)
@@ -94,18 +91,24 @@ func (c *Calculator) tick(ctx context.Context) error {
 	} else {
 		c.saturatedStreak = 0
 	}
+	// System V is read once per batch (Java parity: the oracle snapshots V
+	// per batch, not per task); every tag below reserves against it.
+	systemV, err := c.deps.VT.SystemV(ctx)
+	if err != nil {
+		return err
+	}
 	for _, t := range received {
-		if err := c.tagOne(ctx, t); err != nil {
+		if err := c.tagOne(ctx, t, systemV); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *Calculator) tagOne(ctx context.Context, t *domain.Task) error {
+func (c *Calculator) tagOne(ctx context.Context, t *domain.Task, systemV float64) error {
 	cfg := c.deps.Config
 	// Reserve is atomic per key; concurrent calculators get sequential tags.
-	tag, err := c.deps.VT.Reserve(ctx, t.FairnessKey, domain.DefaultQuantum, t.EffectiveWeight())
+	tag, err := c.deps.VT.ReserveAt(ctx, t.FairnessKey, systemV, domain.DefaultQuantum, t.EffectiveWeight())
 	if err != nil {
 		return err
 	}
@@ -129,5 +132,7 @@ func (c *Calculator) tagOne(ctx context.Context, t *domain.Task) error {
 		t.Priority = domain.SequentialAdjust(t.Priority, &t.SequenceNumber, &last, st.Blocked)
 	}
 	t.Status = domain.StatusQueued
-	return c.deps.Tasks.Save(ctx, t)
+	// Targeted queueing UPDATE (no full-row Save); a zero-match means the
+	// task moved concurrently (e.g. timed out between load and tag).
+	return c.deps.Tasks.MarkQueued(ctx, t.ID, t.Priority, t.VirtualFinish)
 }

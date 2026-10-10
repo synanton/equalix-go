@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -541,5 +542,243 @@ func TestPoolDropsClosedConn(t *testing.T) {
 	c.Release()
 	if after := pid(); after == before {
 		t.Fatalf("pool reused closed conn (pid %d)", after)
+	}
+}
+
+func TestInsertNewRow(t *testing.T) {
+	clean(t)
+	in := &domain.Task{
+		ID: uuid(60), FairnessKey: "a", Weight: 1.0, Status: domain.StatusReceived,
+		CreatedAt: time.Now(),
+	}
+	if err := tasks.Insert(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	if in.Version != 0 {
+		t.Fatalf("new task version = %d, want 0", in.Version)
+	}
+	got, err := tasks.FindByID(ctx, in.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != domain.StatusReceived || got.FairnessKey != "a" {
+		t.Fatalf("round trip mismatch: %+v", got)
+	}
+	// Duplicate ID conflicts instead of silently replacing.
+	dup := &domain.Task{
+		ID: uuid(60), FairnessKey: "b", Weight: 1.0, Status: domain.StatusReceived,
+		CreatedAt: time.Now(),
+	}
+	if err := tasks.Insert(ctx, dup); !errors.Is(err, port.ErrVersionConflict) {
+		t.Fatalf("duplicate insert err = %v, want ErrVersionConflict", err)
+	}
+}
+
+func TestMarkQueuedTransition(t *testing.T) {
+	clean(t)
+	in := &domain.Task{
+		ID: uuid(61), FairnessKey: "a", Weight: 1.0, Status: domain.StatusReceived,
+		CreatedAt: time.Now(),
+	}
+	if err := tasks.Insert(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks.MarkQueued(ctx, in.ID, 1500, 1500.0); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tasks.FindByID(ctx, in.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != domain.StatusQueued || got.Priority != 1500 || !got.HasPriority ||
+		got.VirtualFinish != 1500.0 {
+		t.Fatalf("queueing mismatch: %+v", got)
+	}
+	// Second transition is a no-op (no longer RECEIVED), not an error.
+	if err := tasks.MarkQueued(ctx, in.ID, 999, 999.0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBulkMarkDispatchedSubset(t *testing.T) {
+	clean(t)
+	for i, p := range []int64{100, 200} {
+		tk := queuedTask(70+i, "a", p)
+		if err := tasks.Save(ctx, tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done := queuedTask(72, "a", 300)
+	done.Status = domain.StatusDispatched
+	if err := tasks.Save(ctx, done); err != nil {
+		t.Fatal(err)
+	}
+	marked, err := tasks.BulkMarkDispatched(ctx, []string{uuid(70), uuid(71), uuid(72)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marked != 2 {
+		t.Fatalf("marked = %d, want 2 (already-dispatched row skipped)", marked)
+	}
+	if n, err := tasks.BulkMarkDispatched(ctx, nil); err != nil || n != 0 {
+		t.Fatalf("empty bulk = %d, %v; want 0, nil", n, err)
+	}
+}
+
+func backdateCreated(t *testing.T, id string, hours int) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `UPDATE tasks SET created_at = now() - ($1::text || ' hours')::interval
+        WHERE id = $2::uuid`, strconv.Itoa(hours), id); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPromoteStarvedBulk(t *testing.T) {
+	clean(t)
+	old := queuedTask(80, "a", 5000)
+	if err := tasks.Save(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	fresh := queuedTask(81, "a", 100)
+	if err := tasks.Save(ctx, fresh); err != nil {
+		t.Fatal(err)
+	}
+	backdateCreated(t, uuid(80), 2)
+	n, err := tasks.PromoteStarved(ctx, time.Hour, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("promoted = %d, want 1 (fresh row untouched)", n)
+	}
+	got, err := tasks.FindByID(ctx, uuid(80))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Priority != 0 || !got.HasPriority {
+		t.Fatalf("promoted row = %+v, want priority 0", got)
+	}
+	v0 := got.Version
+	// Re-promotion touches nothing (no version churn on already-0 rows).
+	if n, err := tasks.PromoteStarved(ctx, time.Hour, 10); err != nil || n != 0 {
+		t.Fatalf("re-promote = %d, %v; want 0, nil", n, err)
+	}
+	got, err = tasks.FindByID(ctx, uuid(80))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != v0 {
+		t.Fatalf("version churned %d → %d on re-promotion", v0, got.Version)
+	}
+}
+
+func TestCompleteTerminalGuarded(t *testing.T) {
+	clean(t)
+	tk := queuedTask(90, "a", 100)
+	tk.Status = domain.StatusDispatched
+	if err := tasks.Save(ctx, tk); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := tasks.FindByID(ctx, uuid(90))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := tasks.Complete(ctx, uuid(90), cur.Version, domain.StatusSucceeded, "", time.Now())
+	if err != nil || !done {
+		t.Fatalf("complete = %v, %v; want true, nil", done, err)
+	}
+	got, err := tasks.FindByID(ctx, uuid(90))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != domain.StatusSucceeded || got.Version != cur.Version+1 {
+		t.Fatalf("completed row = %+v", got)
+	}
+	// Stale version and terminal rows both report false, never an error.
+	if done, err := tasks.Complete(ctx, uuid(90), cur.Version, domain.StatusFailed, "x", time.Now()); err != nil || done {
+		t.Fatalf("stale complete = %v, %v; want false, nil", done, err)
+	}
+	if done, err := tasks.Complete(ctx, uuid(90), got.Version, domain.StatusFailed, "x", time.Now()); err != nil || done {
+		t.Fatalf("terminal complete = %v, %v; want false, nil", done, err)
+	}
+}
+
+func TestMarkCommittedStale(t *testing.T) {
+	clean(t)
+	tk := queuedTask(91, "a", 100)
+	tk.Status = domain.StatusDispatched
+	if err := tasks.Save(ctx, tk); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := tasks.MarkCommitted(ctx, uuid(91))
+	if err != nil || !moved {
+		t.Fatalf("mark = %v, %v; want true, nil", moved, err)
+	}
+	moved, err = tasks.MarkCommitted(ctx, uuid(91))
+	if err != nil || moved {
+		t.Fatalf("re-mark = %v, %v; want false, nil", moved, err)
+	}
+}
+
+func TestMarkTimeoutGuarded(t *testing.T) {
+	clean(t)
+	tk := queuedTask(92, "a", 100)
+	tk.Status = domain.StatusCommitted
+	if err := tasks.Save(ctx, tk); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := tasks.FindByID(ctx, uuid(92))
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved, err := tasks.MarkTimeout(ctx, uuid(92), cur.Version, "too slow", time.Now())
+	if err != nil || !moved {
+		t.Fatalf("timeout = %v, %v; want true, nil", moved, err)
+	}
+	got, err := tasks.FindByID(ctx, uuid(92))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != domain.StatusTimeout || got.LastError != "too slow" {
+		t.Fatalf("timed-out row = %+v", got)
+	}
+}
+
+func TestCountsAddBatch(t *testing.T) {
+	clean(t)
+	if err := counts.AddBatch(ctx, map[string]int{"a": 3, "b": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := counts.AddBatch(ctx, map[string]int{"a": 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := counts.AddBatch(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	all, err := counts.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all["a"] != 5 || all["b"] != 1 {
+		t.Fatalf("counts = %v, want map[a:5 b:1]", all)
+	}
+}
+
+func TestReserveAtBatchV(t *testing.T) {
+	clean(t)
+	v, err := vtime.SystemV(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := vtime.ReserveAt(ctx, "a", v, 1000, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t2, err := vtime.ReserveAt(ctx, "a", v, 1000, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if t1 != v+1000 || t2 != v+2000 {
+		t.Fatalf("tags = %v, %v; want %v, %v", t1, t2, v+1000, v+2000)
 	}
 }
