@@ -140,7 +140,7 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := h.deps.Tasks.Save(r.Context(), task); err != nil {
+	if err := h.deps.Tasks.Insert(r.Context(), task); err != nil {
 		h.internal(w)
 		return
 	}
@@ -203,13 +203,26 @@ func (h *Handler) completeTask(w http.ResponseWriter, r *http.Request) {
 		task.LastError = *req.Error
 	}
 	task.CompletedAt = now
-	if err := h.deps.Tasks.Save(r.Context(), task); err != nil {
+	// Targeted terminal UPDATE (guards inline): one statement instead of a
+	// full-row Save, same conflict semantics as before.
+	moved, err := h.deps.Tasks.Complete(r.Context(), id, task.Version,
+		task.Status, task.LastError, task.CompletedAt)
+	if err != nil {
 		if isConflict(err) {
 			re, rerr := h.deps.Tasks.FindByID(r.Context(), id)
 			if rerr == nil && re.Status.IsTerminal() {
 				w.WriteHeader(http.StatusOK) // lost race to a duplicate: success
 				return
 			}
+		}
+		h.badRequest(w, "concurrent completion for task: "+id)
+		return
+	}
+	if !moved {
+		re, rerr := h.deps.Tasks.FindByID(r.Context(), id)
+		if rerr == nil && re.Status.IsTerminal() {
+			w.WriteHeader(http.StatusOK) // lost race to a duplicate: success
+			return
 		}
 		h.badRequest(w, "concurrent completion for task: "+id)
 		return

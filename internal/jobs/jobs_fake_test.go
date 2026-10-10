@@ -101,6 +101,83 @@ func (f *fakeTasks) FindStarved(_ context.Context, _ time.Duration, _ int) ([]*d
 	return nil, nil
 }
 
+func (f *fakeTasks) Insert(ctx context.Context, t *domain.Task) error {
+	return f.Save(ctx, t)
+}
+
+func (f *fakeTasks) MarkQueued(_ context.Context, id string, priority int64, virtualFinish float64) error {
+	f.b.mu.Lock()
+	defer f.b.mu.Unlock()
+	t, ok := f.b.tasks[id]
+	if !ok || t.Status != domain.StatusReceived {
+		return nil
+	}
+	t.Status = domain.StatusQueued
+	t.Priority = priority
+	t.HasPriority = true
+	t.VirtualFinish = virtualFinish
+	return nil
+}
+
+func (f *fakeTasks) BulkMarkDispatched(_ context.Context, ids []string) (int, error) {
+	f.b.mu.Lock()
+	defer f.b.mu.Unlock()
+	marked := 0
+	for _, id := range ids {
+		if t, ok := f.b.tasks[id]; ok && t.Status == domain.StatusQueued {
+			t.Status = domain.StatusDispatched
+			marked++
+		}
+	}
+	return marked, nil
+}
+
+func (f *fakeTasks) PromoteStarved(_ context.Context, _ time.Duration, _ int) (int, error) {
+	f.b.mu.Lock()
+	defer f.b.mu.Unlock()
+	promoted := 0
+	for _, t := range f.b.tasks {
+		if t.Status == domain.StatusQueued && !t.Sequential && t.Priority != 0 {
+			t.Priority = 0
+			t.HasPriority = true
+			promoted++
+		}
+	}
+	return promoted, nil
+}
+
+func (f *fakeTasks) Complete(_ context.Context, id string, version int64, status domain.Status,
+	lastError string, completedAt time.Time) (bool, error) {
+	f.b.mu.Lock()
+	defer f.b.mu.Unlock()
+	t, ok := f.b.tasks[id]
+	if !ok || !t.Status.IsInFlight() || t.Version != version {
+		return false, nil
+	}
+	t.Status = status
+	t.LastError = lastError
+	t.CompletedAt = completedAt
+	t.Version++
+	return true, nil
+}
+
+func (f *fakeTasks) MarkCommitted(_ context.Context, id string) (bool, error) {
+	f.b.mu.Lock()
+	defer f.b.mu.Unlock()
+	t, ok := f.b.tasks[id]
+	if !ok || t.Status != domain.StatusDispatched {
+		return false, nil
+	}
+	t.Status = domain.StatusCommitted
+	t.Version++
+	return true, nil
+}
+
+func (f *fakeTasks) MarkTimeout(ctx context.Context, id string, version int64, lastError string,
+	completedAt time.Time) (bool, error) {
+	return f.Complete(ctx, id, version, domain.StatusTimeout, lastError, completedAt)
+}
+
 func (f *fakeTasks) FindTimedOut(_ context.Context, olderThan time.Duration, limit int) ([]*domain.Task, error) {
 	f.b.mu.Lock()
 	defer f.b.mu.Unlock()
@@ -157,6 +234,15 @@ func (f *fakeCounts) Increment(_ context.Context, k string) error {
 	return nil
 }
 
+func (f *fakeCounts) AddBatch(_ context.Context, deltas map[string]int) error {
+	for k, d := range deltas {
+		for i := 0; i < d; i++ {
+			f.b.counts.Increment(k)
+		}
+	}
+	return nil
+}
+
 func (f *fakeCounts) Decrement(_ context.Context, k string) error {
 	f.b.counts.Decrement(k)
 	return nil
@@ -191,6 +277,10 @@ var _ port.VirtualTimeRepository = (*fakeVT)(nil)
 
 func (f *fakeVT) Reserve(_ context.Context, k string, q, w float64) (float64, error) {
 	return f.b.vt.Reserve(k, q, w), nil
+}
+
+func (f *fakeVT) ReserveAt(_ context.Context, k string, v, q, w float64) (float64, error) {
+	return f.b.vt.ReserveAt(k, v, q, w), nil
 }
 
 func (f *fakeVT) RecordDispatch(_ context.Context, tags, credits map[string]float64) error {

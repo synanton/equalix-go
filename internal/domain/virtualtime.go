@@ -83,12 +83,19 @@ func (s *Store) SystemV() float64 {
 	return s.v
 }
 
-// Reserve atomically assigns the next finish tag for key (queueing path).
+// Reserve atomically assigns the next finish tag for key (queueing path),
+// snapshotting V itself. Batch callers that snapshot V once should use
+// ReserveAt instead (same arithmetic, one V read per batch).
 func (s *Store) Reserve(key string, quantum, weight float64) float64 {
+	return s.ReserveAt(key, s.SystemV(), quantum, weight)
+}
+
+// ReserveAt assigns the next finish tag against a caller-provided V.
+func (s *Store) ReserveAt(key string, v, quantum, weight float64) float64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.keys[key]
-	tag := ReserveFinishTag(st.Finish, s.v, quantum, weight)
+	tag := ReserveFinishTag(st.Finish, v, quantum, weight)
 	st.Finish = tag
 	s.keys[key] = st
 	return tag

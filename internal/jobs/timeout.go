@@ -112,8 +112,16 @@ func (s *Timeout) expireOne(ctx context.Context, t *domain.Task, now time.Time) 
 		cur.Status = domain.StatusTimeout
 		cur.LastError = fmt.Sprintf("Exceeded task timeout of %v", s.deps.Config.TaskTimeout)
 		cur.CompletedAt = now
-		if err := tx.Tasks.Save(ctx, cur); err != nil {
+		// Targeted expiry UPDATE (guards inline); a concurrent terminal
+		// transition reports false and the slot release is skipped rather
+		// than double-applied — strictly more tolerant than Save, which
+		// surfaced the conflict to the sweep loop.
+		moved, err := tx.Tasks.MarkTimeout(ctx, cur.ID, cur.Version, cur.LastError, cur.CompletedAt)
+		if err != nil {
 			return err
+		}
+		if !moved {
+			return nil
 		}
 		if err := tx.Counts.Decrement(ctx, cur.FairnessKey); err != nil {
 			return err
