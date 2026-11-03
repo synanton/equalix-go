@@ -76,14 +76,6 @@ jobs:
       - name: Start Postgres
         run: docker compose -f equalix-go/test/differential/docker-compose.yml up -d --wait
 
-      - name: Create databases
-        run: |
-          docker compose -f equalix-go/test/differential/docker-compose.yml exec -T postgres \
-            psql -U postgres -c "CREATE USER cmp WITH PASSWORD 'x' SUPERUSER;" \
-            -c "CREATE DATABASE equalix_java OWNER cmp;" \
-            -c "CREATE DATABASE equalix_go OWNER cmp;" \
-            -c "CREATE DATABASE equalix_go2 OWNER cmp;"
-
       - name: Build Go binary
         working-directory: equalix-go
         run: go build -o /tmp/equalix-go ./cmd/equalix-go
